@@ -6,6 +6,7 @@ import math
 import os
 import random
 import signal
+from datetime import datetime
 from pathlib import Path
 
 import torch
@@ -37,15 +38,17 @@ def load_config(path):
     floor = config["generation"]["log_success_floor"]
     if not math.isfinite(floor) or floor >= 0:
         raise ValueError("generation.log_success_floor must be finite and negative")
-    for key in ("room_data", "run_dir"):
-        config[key] = str(Path(config[key]).resolve())
+    config["room_data"] = str(Path(config["room_data"]).resolve())
     return config
 
 
 class TrainingSession:
     def __init__(self, config, resume):
         self.config = config
-        self.run_dir = Path(config["run_dir"])
+        if resume is None:
+            self.run_dir = Path("runs") / datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        else:
+            self.run_dir = resume.resolve().parent.parent
         self.catalog = Catalog(config["room_data"])
         self.catalog_hash = hashlib.sha256(Path(config["room_data"]).read_bytes()).hexdigest()
         self.device = torch.device(config["device"])
@@ -72,6 +75,7 @@ class TrainingSession:
         for name in ("experience", "checkpoints", "metrics"):
             (self.run_dir / name).mkdir(exist_ok=True)
         (self.run_dir / "config.json").write_text(json.dumps(config, indent=2) + "\n")
+        logging.info("Run directory: %s", self.run_dir)
 
     def request_stop(self, signum, _frame):
         if self.stop_requested:

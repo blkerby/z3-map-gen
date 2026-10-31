@@ -1,6 +1,5 @@
 {
   "room_data": "data/rooms.json",
-  "run_dir": "runs/initial",
   "device": "cpu",
   "seed": 0,
   "rounds": 100,
