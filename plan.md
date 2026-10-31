@@ -49,6 +49,8 @@ An empty neighboring cell imposes no edge constraint. A skipped cell remains emp
 
 Segment choices are independent according to the source-data contract, so checking nonempty intersections is enough for this placement phase. Do not select a concrete variant yet.
 
+Implemented in `src/lib.rs` as a safe-Rust library. Deserialize the export into `Catalog` with `serde_json`, share it through `Arc`, and create an `Environment`. `can_place` checks geometry at any anchor using a catalog room index; `list_candidates` applies the row-major generation rule and returns actions carrying explicit source room IDs. `apply_action` checks the action against the current candidates before changing the board. `replay` reconstructs a real-action prefix or an episode with dummy padding, up to 40 slots. `get_cells` and `get_positions` expose read-only state in row-major and catalog order respectively. An empty candidate list indicates exhaustion; a dummy action is accepted only then and leaves the state unchanged. The generation caller supplies the 40-slot episode loop.
+
 ## Generation loop and batching
 
 For each environment, scan empty cells in row-major order: smallest `y` first, then smallest `x`. At each cell, enumerate valid unused rooms anchored there. Skip cells with no candidates and stop scanning at the first cell with candidates. Offer all valid candidates at that cell; do not offer placements at later cells while an earlier cell has a valid candidate.
