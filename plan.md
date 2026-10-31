@@ -26,6 +26,8 @@ Preserve segment order: west to east on north/south edges and north to south on 
 
 Do not export names, vanilla positions, defaults, variant-to-node arrays, node logic, or entrance data. The board size is fixed at 8×8 in this project. Check that the exported room area totals 64. Rely on the source project's schema and validator for the full room-data contract rather than duplicating them.
 
+Implemented by `scripts/export_rooms.py` using only the Python standard library. From the project root, regenerate the current catalog with `python scripts/export_rooms.py ../z3-map-rando/z3-json-data data/rooms.json`.
+
 ## Environment and placement rules
 
 Use Rust for environment state, candidate enumeration, speculative state features, and replay, exposed to Python through PyO3/maturin. Use Python/PyTorch for the model, scoring, sampling, and training. Take the division of responsibilities from `~/map-gen`, without copying its frontier machinery, balancing objectives, proposal networks, or generation pipeline.
