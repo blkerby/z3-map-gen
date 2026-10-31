@@ -6,6 +6,7 @@ import math
 import os
 import random
 import signal
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -75,7 +76,6 @@ class TrainingSession:
         for name in ("experience", "checkpoints", "metrics"):
             (self.run_dir / name).mkdir(exist_ok=True)
         (self.run_dir / "config.json").write_text(json.dumps(config, indent=2) + "\n")
-        logging.info("Run directory: %s", self.run_dir)
 
     def request_stop(self, signum, _frame):
         if self.stop_requested:
@@ -128,7 +128,6 @@ class TrainingSession:
                 path = self.run_dir / "experience" / f"round_{number}.safetensors"
                 self.experience[number] = ExperienceRound.load(path, self.catalog_hash)
         total_loss = 0.0
-        supervised_entries = 0
         for _ in range(settings["batches_per_round"]):
             episodes = []
             labels = []
@@ -149,10 +148,8 @@ class TrainingSession:
             loss.backward()
             self.optimizer.step()
             total_loss += loss.item()
-            supervised_entries += unresolved.sum().item()
         return {
-            "mean_batch_loss": total_loss / settings["batches_per_round"],
-            "loss_per_entry": total_loss / supervised_entries if supervised_entries else 0.0,
+            "loss_per_prefix": total_loss / (settings["batches_per_round"] * settings["batch_size"]),
         }
 
     def save_checkpoint(self):
@@ -161,14 +158,12 @@ class TrainingSession:
             path, self.model, self.optimizer, self.completed_round, self.config,
             self.catalog_hash, self.catalog.room_ids,
         )
-        logging.info("Saved checkpoint: %s", path)
 
     def run(self):
         last_saved_round = None
         for number in range(self.completed_round + 1, self.config["rounds"] + 1):
             if self.stop_requested:
                 break
-            logging.info("Generating round %s", number)
             data = self.generate_round()
             save_tensors(
                 self.run_dir / "experience" / f"round_{number}.safetensors", data,
@@ -179,7 +174,6 @@ class TrainingSession:
                     "config": json.dumps(self.config),
                 },
             )
-            logging.info("Training round %s", number)
             metrics = self.train_round(number)
             room_count = len(self.catalog.room_ids)
             outcomes = data["outcomes"].float()
@@ -196,7 +190,7 @@ class TrainingSession:
             logging.info(
                 "Round %s: complete=%.3f rooms=%.2f cells=%.2f loss=%.4f", number,
                 metrics["complete_map_frequency"], metrics["mean_rooms_placed"],
-                metrics["mean_occupied_cells"], metrics["mean_batch_loss"],
+                metrics["mean_occupied_cells"], metrics["loss_per_prefix"],
             )
             if number % self.config["checkpoint_period"] == 0:
                 self.save_checkpoint()
@@ -212,8 +206,17 @@ def main():
     parser.add_argument("config", type=Path)
     parser.add_argument("--resume", type=Path, help="Resume a safetensors checkpoint in the same run")
     args = parser.parse_args()
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     session = TrainingSession(load_config(args.config), args.resume)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(message)s",
+        datefmt="%H:%M:%S",
+        handlers=[
+            logging.StreamHandler(sys.stdout),
+            logging.FileHandler(session.run_dir / "train.log", encoding="utf-8"),
+        ],
+    )
+    logging.info("Run directory: %s", session.run_dir)
     signal.signal(signal.SIGINT, session.request_stop)
     signal.signal(signal.SIGTERM, session.request_stop)
     session.run()
