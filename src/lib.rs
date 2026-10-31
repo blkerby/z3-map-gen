@@ -159,11 +159,9 @@ impl Environment {
     pub fn extract_candidate_features(&self) -> Vec<(Action, Features)> {
         let mut candidates = Vec::new();
         for action in self.list_candidates() {
-            if let Action::Place { room_id, x, y } = action {
-                let mut speculative = self.clone();
-                speculative.place_room(room_id, x, y);
-                candidates.push((action, speculative.extract_features()));
-            }
+            let mut speculative = self.clone();
+            speculative.apply_action(action);
+            candidates.push((action, speculative.extract_features()));
         }
         candidates
     }
@@ -265,24 +263,11 @@ impl Environment {
         Vec::new()
     }
 
-    /// Apply a generation action, rejecting invalid replay data before mutation.
-    pub fn apply_action(&mut self, action: Action) -> Result<(), &'static str> {
-        let candidates = self.list_candidates();
+    /// Apply an action trusted to be valid for this state; dummy padding is a no-op.
+    pub fn apply_action(&mut self, action: Action) {
         let Action::Place { room_id, x, y } = action else {
-            return if candidates.is_empty() {
-                Ok(())
-            } else {
-                Err("dummy action before exhaustion")
-            };
+            return;
         };
-        if !candidates.contains(&action) {
-            return Err("placement is not a current candidate");
-        }
-        self.place_room(room_id, x, y);
-        Ok(())
-    }
-
-    fn place_room(&mut self, room_id: usize, x: usize, y: usize) {
         let room_index = self
             .catalog
             .rooms
@@ -298,14 +283,14 @@ impl Environment {
         }
     }
 
-    /// Replay a real-action prefix or an episode including its dummy tail.
+    /// Replay trusted real actions or an episode including its dummy tail.
     pub fn replay(catalog: Arc<Catalog>, actions: &[Action]) -> Result<Self, &'static str> {
         if actions.len() > EPISODE_LENGTH {
             return Err("episode exceeds 40 action slots");
         }
         let mut environment = Self::new(catalog);
         for &action in actions {
-            environment.apply_action(action)?;
+            environment.apply_action(action);
         }
         Ok(environment)
     }

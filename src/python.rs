@@ -94,10 +94,8 @@ impl PyEnvironment {
     }
 
     #[pyo3(signature = (action))]
-    fn apply_action(&mut self, action: Option<(usize, usize, usize)>) -> PyResult<()> {
-        self.inner
-            .apply_action(decode_action(action))
-            .map_err(PyValueError::new_err)
+    fn apply_action(&mut self, action: Option<(usize, usize, usize)>) {
+        self.inner.apply_action(decode_action(action));
     }
 
     #[staticmethod]
