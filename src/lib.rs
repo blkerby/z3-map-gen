@@ -1,6 +1,8 @@
 use serde::Deserialize;
 use std::sync::Arc;
 
+mod python;
+
 pub const BOARD_SIZE: usize = 8;
 pub const EPISODE_LENGTH: usize = 40;
 
@@ -91,6 +93,13 @@ pub enum Action {
     Dummy,
 }
 
+#[pyo3::pyclass(frozen, get_all, skip_from_py_object, module = "z3_map_gen")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Features {
+    pub room_cells: Vec<i64>,
+    pub room_positions: Vec<i64>,
+}
+
 #[derive(Clone, Debug)]
 pub struct Environment {
     catalog: Arc<Catalog>,
@@ -123,6 +132,40 @@ impl Environment {
     /// Room anchors in catalog order.
     pub fn get_positions(&self) -> &[Option<[usize; 2]>] {
         &self.positions
+    }
+
+    pub fn extract_features(&self) -> Features {
+        let mut features = Features {
+            room_cells: vec![-1; BOARD_SIZE * BOARD_SIZE],
+            room_positions: vec![-1; self.catalog.rooms.len()],
+        };
+        let mut cell_offset = 0;
+        for (room_index, room) in self.catalog.rooms.iter().enumerate() {
+            let [width, height] = room.size;
+            if let Some([x, y]) = self.positions[room_index] {
+                features.room_positions[room_index] = (y * BOARD_SIZE + x) as i64;
+                for dy in 0..height {
+                    for dx in 0..width {
+                        features.room_cells[(y + dy) * BOARD_SIZE + x + dx] =
+                            (cell_offset + dy * width + dx) as i64;
+                    }
+                }
+            }
+            cell_offset += width * height;
+        }
+        features
+    }
+
+    pub fn extract_candidate_features(&self) -> Vec<(Action, Features)> {
+        let mut candidates = Vec::new();
+        for action in self.list_candidates() {
+            if let Action::Place { room_id, x, y } = action {
+                let mut speculative = self.clone();
+                speculative.place_room(room_id, x, y);
+                candidates.push((action, speculative.extract_features()));
+            }
+        }
+        candidates
     }
 
     /// Check geometric validity at any anchor, independently of scan order.
@@ -235,6 +278,11 @@ impl Environment {
         if !candidates.contains(&action) {
             return Err("placement is not a current candidate");
         }
+        self.place_room(room_id, x, y);
+        Ok(())
+    }
+
+    fn place_room(&mut self, room_id: usize, x: usize, y: usize) {
         let room_index = self
             .catalog
             .rooms
@@ -248,7 +296,6 @@ impl Environment {
                 self.cells[(y + dy) * BOARD_SIZE + x + dx] = Some(room_index);
             }
         }
-        Ok(())
     }
 
     /// Replay a real-action prefix or an episode including its dummy tail.
