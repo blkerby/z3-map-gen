@@ -4,24 +4,85 @@ use std::sync::Arc;
 pub const BOARD_SIZE: usize = 8;
 pub const EPISODE_LENGTH: usize = 40;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug)]
 pub struct Catalog {
     pub rooms: Vec<Room>,
+    segment_matches: Vec<Vec<bool>>,
+    segment_closed: Vec<bool>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug)]
 pub struct Room {
     pub id: usize,
     pub size: [usize; 2],
     pub edges: Edges,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default)]
 pub struct Edges {
-    pub north: Vec<Vec<String>>,
-    pub south: Vec<Vec<String>>,
-    pub east: Vec<Vec<String>>,
-    pub west: Vec<Vec<String>>,
+    pub north: Vec<usize>,
+    pub south: Vec<usize>,
+    pub east: Vec<usize>,
+    pub west: Vec<usize>,
+}
+
+impl Catalog {
+    /// Index room segments and precompute compatibility once at startup.
+    pub fn load_json(json: &str) -> Result<Self, serde_json::Error> {
+        #[derive(Deserialize)]
+        struct SourceCatalog {
+            rooms: Vec<SourceRoom>,
+        }
+        #[derive(Deserialize)]
+        struct SourceRoom {
+            id: usize,
+            size: [usize; 2],
+            edges: SourceEdges,
+        }
+        #[derive(Deserialize)]
+        struct SourceEdges {
+            north: Vec<Vec<String>>,
+            south: Vec<Vec<String>>,
+            east: Vec<Vec<String>>,
+            west: Vec<Vec<String>>,
+        }
+
+        let source: SourceCatalog = serde_json::from_str(json)?;
+        let mut rooms = Vec::new();
+        let mut segments = Vec::new();
+        for room in source.rooms {
+            let mut edges = Edges::default();
+            for (source_segments, indices) in [
+                (room.edges.north, &mut edges.north),
+                (room.edges.south, &mut edges.south),
+                (room.edges.east, &mut edges.east),
+                (room.edges.west, &mut edges.west),
+            ] {
+                for variants in source_segments {
+                    indices.push(segments.len());
+                    segments.push(variants);
+                }
+            }
+            rooms.push(Room {
+                id: room.id,
+                size: room.size,
+                edges,
+            });
+        }
+        let mut segment_matches = vec![vec![false; segments.len()]; segments.len()];
+        let mut segment_closed = Vec::new();
+        for (i, variants) in segments.iter().enumerate() {
+            segment_closed.push(variants.iter().any(|variant| variant == "closed"));
+            for (j, other) in segments.iter().enumerate() {
+                segment_matches[i][j] = variants.iter().any(|variant| other.contains(variant));
+            }
+        }
+        Ok(Self {
+            rooms,
+            segment_matches,
+            segment_closed,
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -85,12 +146,12 @@ impl Environment {
         }
         for dx in 0..width {
             if !self.check_contact(
-                &room.edges.north[dx],
+                room.edges.north[dx],
                 (x + dx) as isize,
                 y as isize - 1,
                 Direction::South,
             ) || !self.check_contact(
-                &room.edges.south[dx],
+                room.edges.south[dx],
                 (x + dx) as isize,
                 (y + height) as isize,
                 Direction::North,
@@ -100,12 +161,12 @@ impl Environment {
         }
         for dy in 0..height {
             if !self.check_contact(
-                &room.edges.west[dy],
+                room.edges.west[dy],
                 x as isize - 1,
                 (y + dy) as isize,
                 Direction::East,
             ) || !self.check_contact(
-                &room.edges.east[dy],
+                room.edges.east[dy],
                 (x + width) as isize,
                 (y + dy) as isize,
                 Direction::West,
@@ -116,9 +177,9 @@ impl Environment {
         true
     }
 
-    fn check_contact(&self, variants: &[String], x: isize, y: isize, side: Direction) -> bool {
+    fn check_contact(&self, segment: usize, x: isize, y: isize, side: Direction) -> bool {
         if !(0..BOARD_SIZE as isize).contains(&x) || !(0..BOARD_SIZE as isize).contains(&y) {
-            return variants.iter().any(|variant| variant == "closed");
+            return self.catalog.segment_closed[segment];
         }
         let x = x as usize;
         let y = y as usize;
@@ -127,15 +188,13 @@ impl Environment {
         };
         let [anchor_x, anchor_y] = self.positions[room_index].unwrap();
         let edges = &self.catalog.rooms[room_index].edges;
-        let neighbor_variants = match side {
-            Direction::North => &edges.north[x - anchor_x],
-            Direction::South => &edges.south[x - anchor_x],
-            Direction::East => &edges.east[y - anchor_y],
-            Direction::West => &edges.west[y - anchor_y],
+        let neighbor_segment = match side {
+            Direction::North => edges.north[x - anchor_x],
+            Direction::South => edges.south[x - anchor_x],
+            Direction::East => edges.east[y - anchor_y],
+            Direction::West => edges.west[y - anchor_y],
         };
-        variants
-            .iter()
-            .any(|variant| neighbor_variants.contains(variant))
+        self.catalog.segment_matches[segment][neighbor_segment]
     }
 
     /// An empty result means exhaustion; dummy padding is never a candidate.
