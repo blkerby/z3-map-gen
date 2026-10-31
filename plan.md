@@ -4,7 +4,7 @@
 
 Create a standalone project that generates overworld layouts on an 8×8 grid. Place every overworld room exactly once, without overlap, while respecting neighboring edge compatibility and a closed outer boundary. Use a learned outcome predictor to score speculative placements, then sample a placement using a temperature-controlled softmax. Do not use backtracking.
 
-Continue partially failed maps until no further room can be placed. These episodes still provide useful per-room outcome labels for training. Complete placement is the initial success criterion; traversal connectivity and concrete edge-type selection are deferred.
+Continue partially failed maps until no further room can be placed. These episodes still provide useful per-room and per-cell outcome labels for training. Complete placement is the initial success criterion; traversal connectivity and concrete edge-type selection are deferred.
 
 ## Verified source data
 
@@ -29,6 +29,8 @@ Do not export names, vanilla positions, defaults, variant-to-node arrays, node l
 ## Environment and placement rules
 
 Use Rust for environment state, candidate enumeration, speculative state features, and replay, exposed to Python through PyO3/maturin. Use Python/PyTorch for the model, scoring, sampling, and training. Take the division of responsibilities from `~/map-gen`, without copying its frontier machinery, balancing objectives, proposal networks, or generation pipeline.
+
+Do not imitate `~/map-gen`'s `engine.rs` layer or its heavy use of `unsafe`. Implement the environment with ordinary owned Rust state and safe borrowing. Start with straightforward state copies for speculative placements on this small board, and return owned feature buffers through the Python bindings. Avoid a separate engine abstraction or custom unsafe memory handling; consider further optimization only if measurements justify it.
 
 Represent each room in its original orientation. A placement specifies a room and the upper-left grid coordinate of its footprint. Large rooms may start at any coordinate where they fit; do not restrict them to even coordinates.
 
@@ -55,6 +57,8 @@ Do not stop because an earlier cell is permanently unfillable or full-map succes
 
 Use 40 action slots per episode, one for each possible real room placement. Once an environment is exhausted, fill its remaining slots with a dummy action that leaves its state unchanged. A completed map has 40 real placements; an exhausted incomplete map has a dummy tail. Dummy actions are padding, not alternatives to valid placements. Candidate-count padding is likewise masked out of sampling.
 
+Organize generation settings under a `generation` group, following the configuration structure in `~/map-gen`. Make `generation.environment_count` a required positive integer hyperparameter controlling the number of environments advanced concurrently during generation, and store the sampling temperature as `generation.temperature`. Keep the environment count independent of the training batch size; batching environments does not require a worker thread per environment.
+
 ## Model input features
 
 Encode the existing room placements in two complementary ways, using separate learned embedding tables shared across all cells or rooms respectively:
@@ -66,46 +70,121 @@ Both embedding dimensions are required configurable model hyperparameters. The z
 
 Order cells by row-major position and rooms by the fixed room-ID ordering. Flatten both sets of embedding vectors and concatenate them as the input to a small MLP. Its input width is `64 * room_embedding_dim + 40 * position_embedding_dim`. Do not pool over cells or rooms, since their slots identify absolute positions and room identities. Train both embedding tables jointly with the predictor and save their dimensions and weights in checkpoints.
 
+Make the MLP's number of hidden layers (`model.hidden_layers`) and common hidden-layer width (`model.hidden_width`) required positive integer model hyperparameters. The hidden-layer count excludes the final 104-logit output layer. Save both values in checkpoints alongside the embedding dimensions so the architecture can be reconstructed.
+
 These inputs describe the speculative post-placement state during candidate evaluation and the corresponding replayed state during training. They replace the earlier proposal for raw placement flags and coordinates; no extra occupancy or geometry feature channels are required initially. The fixed room catalog supplies room sizes and edge rules to the environment. The model learns against this catalog; it does not initially need to generalize across different room sets.
 
 ## Outcome predictor and candidate score
 
-The model outputs one logit `z_r(s)` per room, representing the probability that room `r` will be present in the terminal map after continuing from state `s` under the generation policy. This is an outcome prediction, not a distribution over the next room to place.
+The model outputs 104 logits: one per room for the probability that the room will be present in the terminal map, and one per grid cell for the probability that the cell will be filled in the terminal map after continuing from state `s` under the generation policy. Order the 40 room outputs by room ID and the 64 cell outputs in row-major order. These are outcome predictions, not a distribution over the next room to place.
 
-For candidate `a`, let `s_a` be the state after applying it. Already-placed rooms, including the candidate room, have known placement probability 1 and contribute zero to the score. For the other rooms, use the model's predictions:
+For candidate `a`, let `s_a` be the state after applying it. Already-placed rooms and filled cells, including those supplied by the candidate, have known success probability 1 and contribute zero to the score. A known-failed outcome contributes the finite negative `generation.log_success_floor`, initially `-50`. Clamp predicted log-success values at the same floor:
 
 ```text
-p_r(s_a) = sigmoid(z_r(s_a))
-score(a) = sum over rooms not yet placed in s_a of log(p_r(s_a))
+floor = generation.log_success_floor
+log_success_i(s_a) = 0                                  if outcome i is already successful
+                    floor                              if outcome i is known to have failed
+                    max(floor, logsigmoid(z_i(s_a)))    otherwise
+score(a) = sum over all 40 room and 64 cell outcomes of log_success_i(s_a)
 P(select a) = softmax(score(a) / temperature)
 ```
 
+An unused room is known to have failed if it has no valid placement anywhere on the current board. An empty cell is known to have failed if no valid placement of any unused room can cover it. For a large room, covering a cell does not require anchoring at that cell. These checks consider all legal anchors, not only the current generation candidates. Subsequent placements only remove rooms and space or add constraints, so these failures are permanent. Do not mark every unresolved outcome as failed merely because full-map completion is impossible.
+
 Use a positive temperature coefficient and sample from this distribution. Keep temperature fixed within an initial training run; it controls exploration and changes the continuation policy whose outcomes the model predicts. Compute log probabilities directly using `logsigmoid` on logits, rather than taking the logarithm of rounded sigmoid probabilities.
 
-The score is the log of the product of predicted room-placement probabilities, approximating full placement success under an independence assumption. It is a ranking surrogate, not a calibrated joint success probability. After an unfillable cell makes full success impossible, continue using the individual predictions to rank candidates. Do not hard-set failed outcomes to zero probability and collapse every candidate score to negative infinity.
+The score sums equally weighted, floored log-success values for room and cell outcomes. These outcomes are dependent, so this is a ranking surrogate, not a calibrated joint success probability. Accept the possibility that the surrogate can misrank candidates even with accurate marginal predictions; the experimental hope is that training improves the continuation policy and raises success probabilities toward 1. After full success becomes impossible, continue ranking candidates with this same score. Each known failure contributes `-50` rather than negative infinity, allowing candidates with fewer failed outcomes to remain preferable.
 
 ## Training targets and experience
 
-At the end of each episode, construct a binary vector `y` with one entry per room: 1 if the room was placed anywhere in the terminal map, otherwise 0. Use this same terminal vector as the outcome target for every real visited post-placement state in that episode.
+At the end of each episode, construct a binary vector `y` with 104 entries in model-output order: 40 room labels indicating whether each room was placed anywhere in the terminal map, followed by 64 cell labels indicating whether each cell was filled. Use this same terminal vector as the outcome target for every real visited post-placement state in that episode.
 
-Train with binary cross-entropy with logits, independently over the room outcomes. Already-placed rooms have known success and need no learned prediction; mask them out of the learned loss. Exclude dummy padding so shorter failed episodes do not gain extra weight from repeated frozen states. Aggregate over the supervised state-room entries.
+Train with binary cross-entropy with logits, independently over the room and cell outcomes. Already-placed rooms and filled cells have known success and need no learned prediction; mask them out of the learned loss. Exclude dummy padding so shorter failed episodes do not gain extra weight from repeated frozen states. Sum the loss over all supervised state-outcome entries in the training batch; do not take a mean. An empty set of supervised entries contributes zero loss. Apply the `-50` floor only to candidate scoring, not to the logits used for binary cross-entropy.
+
+Make `train.batch_size` a required positive integer hyperparameter specifying the number of replayed post-placement states per training minibatch. Retain the training and generation hyperparameters with the run artifacts. Because the loss is summed, changing the training batch size also changes its scale.
 
 Only the chosen trajectory receives these labels. Do not attach its terminal vector to unchosen speculative candidate states: those candidates were not continued, so their counterfactual outcomes are unknown. Scoring every candidate does not require producing training labels for every candidate.
 
-Store the ordered real placement actions and the terminal outcome vector. Reconstruct visited states and their features by replaying the actions through the same Rust environment. Retain the room ordering, catalog identity, temperature, and model configuration with training artifacts so outputs can be interpreted consistently. Keep the initial experience format simple and specific to this project.
+Store experience in safetensors files, one file per generation round, following the storage approach in `~/map-gen`. Each file contains the ordered placement actions, real-action lengths distinguishing dummy padding, and terminal outcome vectors for all episodes collected in that round. Reconstruct visited states and their features by replaying the real actions through the same Rust environment. Retain the room ordering, catalog identity, temperature, and model configuration with training artifacts so outputs can be interpreted consistently. Keep the initial experience format simple and specific to this project.
 
-Alternate generation under the current model with supervised updates from collected experience. Keep experience reasonably current because the continuation policy changes as the model improves. Full successes are not required to begin learning: failed episodes still contain positive and negative per-room labels. Do not replace this objective with a reward based on room count or occupied area.
+Alternate generation under the current model with supervised updates from collected experience. Accumulate experience rounds indefinitely. Define a required positive integer hyperparameter `train.experience_rounds` giving the number of most recent collected rounds eligible for training, including the latest completed generation round. If fewer rounds exist, use all available rounds. Sample rounds uniformly within this window, then sample experience uniformly within the selected round. Retain older rounds even when they fall outside the sampling window. Historical labels reflect the policies that generated them; accept this mixture within the configured window rather than treating fixed temperature as making the continuation policy stationary. Full successes are not required to begin learning: failed episodes still contain positive and negative room and cell labels. Do not replace this objective with a reward based on room count or occupied area.
+
+## Training configuration
+
+Use one JSON config with `model`, `optimizer`, `generation`, and `train` groups, following the grouping in `~/map-gen` without importing its specialized options. The following is a proposed complete initial config; the numeric values are illustrative starting points, not tuned settings. Every field shown is required, with no silent defaults for missing config fields.
+
+```json
+{
+  "room_data": "data/rooms.json",
+  "run_dir": "runs/initial",
+  "device": "cpu",
+  "seed": 0,
+  "rounds": 100,
+  "checkpoint_period": 10,
+  "model": {
+    "room_embedding_dim": 16,
+    "position_embedding_dim": 8,
+    "hidden_layers": 2,
+    "hidden_width": 256
+  },
+  "optimizer": {
+    "learning_rate": 0.0003,
+    "beta1": 0.9,
+    "beta2": 0.999
+  },
+  "generation": {
+    "environment_count": 64,
+    "batches_per_round": 4,
+    "temperature": 1.0,
+    "log_success_floor": -50.0
+  },
+  "train": {
+    "batch_size": 256,
+    "batches_per_round": 100,
+    "experience_rounds": 10
+  }
+}
+```
+
+Top-level settings describe the run:
+
+- `room_data`: Path to the exported room catalog. Resolve relative paths against the working directory from which training is launched.
+- `run_dir`: Directory for the config snapshot, catalog identity, experience rounds, checkpoints, and metrics. Resolve it the same way as `room_data`; start a new run in a new directory rather than overwriting an existing run.
+- `device`: Single common PyTorch device used for both generation inference and training, such as `cpu` or `cuda:0`. Generation and training alternate on this device; do not introduce separate generation/training device settings or multi-device orchestration. The Rust environment runs on the CPU. Do not silently fall back to another device.
+- `seed`: Seed for model initialization, placement sampling, and training-experience sampling. This controls randomness but does not promise identical results across devices.
+- `rounds`: Number of generation-and-training rounds to execute.
+- `checkpoint_period`: Required positive integer interval between periodic checkpoints, measured in completed generation-and-training rounds. The example saves every ten rounds.
+
+Model and optimizer settings define a plain MLP and its updates. Each of the `model.hidden_layers` hidden layers has `model.hidden_width` units followed by ReLU; the output layer produces 104 raw logits. Use Adam with the configured learning rate and betas, fixed epsilon `1e-8`, and no weight decay. Keep optimizer state across rounds. Do not initially add activation or optimizer selection, learning-rate schedules, dropout, mixed precision, or gradient accumulation.
+
+Generation and training have separate batch controls:
+
+- `generation.environment_count`: Number of concurrent episodes in one generation batch. Each episode has 40 action slots, including any dummy tail.
+- `generation.batches_per_round`: Number of complete generation batches collected before training. A round contains exactly `environment_count * batches_per_round` episodes; the example collects 256 episodes. Hold the model weights fixed throughout this generation phase.
+- `generation.temperature`: Positive sampling temperature, fixed throughout the run.
+- `generation.log_success_floor`: Finite negative floor for candidate-score contributions, including known failures. This does not clamp training logits or the loss.
+- `train.batch_size`: Number of real post-placement states sampled per training minibatch, not episodes or individual room/cell labels.
+- `train.batches_per_round`: Number of sampled minibatches processed after each generation phase. Each minibatch supplies one summed masked BCE loss and one optimizer step; this is a fixed update budget, not a number of passes over the growing experience archive.
+- `train.experience_rounds`: Number of most recent rounds eligible for sampling, including the newly collected round. For each sampled state, choose an eligible round uniformly, then choose uniformly among its real visited post-placement states. Sample with replacement so the configured batch size remains usable during startup. Dummy states never enter the sampling population.
+
+With the example settings, each round collects 256 episodes and then performs 100 updates using 256 sampled states each. The first round samples only itself; once ten rounds exist, each eligible round has probability `1/10` for each sample. Retain every round's safetensors experience file on disk, including rounds outside this window.
+
+Save checkpoints in safetensors format at `run_dir/checkpoints/round_<completed_round>.safetensors`, following `~/map-gen`'s checkpoint approach. Save after each completed round whose number is divisible by `checkpoint_period`, and at normal completion if that round has not already been saved. Each checkpoint contains the model and optimizer state, completed-round count, config, catalog identity, and random-generator states. Store tensor state as named tensors and non-tensor state as safetensors string metadata, using JSON where needed. Write to a temporary file in the same directory, then atomically rename it to the final path. Keep experience in its separate per-round safetensors files.
+
+Follow `~/map-gen`'s interruption behavior: the first SIGINT or SIGTERM requests a graceful stop, allowing the current generation-and-training round to finish and its experience to be stored before saving a checkpoint and exiting. Log that shutdown waits for the current round. A second signal exits immediately without checkpointing. Avoid writing the same completed-round checkpoint twice if periodic saving already handled it. Do not save a checkpoint from a failed partial round after an unexpected exception.
+
+The 8×8 board, 40 action slots, catalog-derived embedding row counts, 104 outputs, equal outcome weights, and summed loss reduction are part of the design rather than configurable options.
 
 ## Implementation sequence
 
 1. Implement the exporter and define its minimal JSON format. Verify the current inventory and total area.
 2. Implement the Rust environment, placement validity, row-major scanning with skipped cells, exhaustion, dummy actions, and deterministic replay.
 3. Add speculative feature extraction and Python bindings for the per-cell room-cell indices and per-room anchor-position indices. Check that speculative features match a separately committed copy of the same state and leave the parent unchanged.
-4. Implement both learned embedding tables with separately configurable dimensions, their flattened concatenation, the small outcome model, summed log-probability score, and temperature-softmax sampling over valid candidates.
-5. Implement batched episode generation, terminal room labels, experience replay, masked binary cross-entropy training, and checkpoint save/load.
+4. Implement both learned embedding tables with separately configurable dimensions, their flattened concatenation, the 104-output MLP with configurable hidden-layer count and width, known-outcome checks, floored summed log-success score, and temperature-softmax sampling over valid candidates.
+5. Implement episode generation with a configurable concurrent environment count, terminal room and cell labels, indefinite experience storage with uniform sampling from the configured recent-round window, replay, summed masked binary cross-entropy training with configurable minibatch size, and checkpoint save/load.
 6. Run a small end-to-end training experiment and inspect learning and generation statistics before adding architectural or throughput complexity.
 
-Use `~/map-gen` as a reference for PyO3/maturin setup, speculative features, binary cross-entropy, `logsigmoid` scoring, and dummy padding. Do not modify that project or the source-data project as part of this implementation.
+Use `~/map-gen` as a reference for PyO3/maturin setup and the concepts of speculative features, binary cross-entropy, `logsigmoid` scoring, and dummy padding, not for its `engine.rs` implementation. Do not modify that project or the source-data project as part of this implementation.
 
 ## Verification and initial measurements
 
@@ -116,10 +195,11 @@ Use temporary checks during development and remove any added test or verificatio
 - Exercise large-room contacts, skipped cells followed by later placements, exhaustion, and dummy tails.
 - Compare speculative features with actual placement features and confirm replay reconstructs the same states and final outcomes.
 - Check distinct room-specific embeddings for all four cells of a large room, zero embeddings for empty cells and unplaced rooms, valid anchor-position embeddings for `[0, 0]`, and the concatenated input width for different embedding dimensions.
-- Check terminal labels, loss masking, candidate sampling masks, and checkpoint round trips in a small training run.
-- Track complete-map frequency, rooms placed, occupied cells, per-room placement frequency, and outcome prediction loss. These are measurements, not additional training objectives.
-
-The earlier exploratory uniform-candidate sampler completed 0 of 1,000 attempts both with and without a closed-boundary requirement. Those trials stopped at the first unfillable cell and therefore do not measure the continued-placement policy specified here. Establish a fresh uniform-candidate baseline with the actual continuation rules before comparing model-guided generation.
+- Exercise different MLP hidden-layer counts and widths, training batch sizes, and concurrent generation environment counts; confirm checkpoint loading restores the configured model architecture.
+- Check room and cell terminal labels, known-failure detection including large-room coverage from other anchors, finite score floors, summed loss masking including zero supervised entries, candidate sampling masks, and checkpoint round trips in a small training run.
+- Check retention of older experience, the recent-round sampling window when fewer than the configured number of rounds exist, and uniform sampling of eligible rounds.
+- Check safetensors checkpoint save/load, the configured round interval, final saving on normal completion, and graceful interruption during generation and training. Confirm a second signal exits immediately and a failed partial round does not produce a checkpoint.
+- Track complete-map frequency, rooms placed, occupied cells, per-room placement frequency, per-cell fill frequency, and outcome prediction loss. These are measurements, not additional training objectives.
 
 ## Deferred work
 
