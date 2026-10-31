@@ -44,6 +44,7 @@ impl PyCatalog {
 struct PyCandidateFeatures {
     actions: Vec<(usize, usize, usize)>,
     features: Vec<Features>,
+    failed_outcomes: Vec<Vec<bool>>,
 }
 
 #[pyclass(name = "Environment", module = "z3_map_gen")]
@@ -84,13 +85,19 @@ impl PyEnvironment {
     fn extract_candidate_features(&self) -> PyCandidateFeatures {
         let mut actions = Vec::new();
         let mut features = Vec::new();
-        for (action, state_features) in self.inner.extract_candidate_features() {
+        let mut failed_outcomes = Vec::new();
+        for (action, state_features, failed) in self.inner.extract_candidate_features() {
             if let Action::Place { room_id, x, y } = action {
                 actions.push((room_id, x, y));
                 features.push(state_features);
+                failed_outcomes.push(failed);
             }
         }
-        PyCandidateFeatures { actions, features }
+        PyCandidateFeatures {
+            actions,
+            features,
+            failed_outcomes,
+        }
     }
 
     #[pyo3(signature = (action))]

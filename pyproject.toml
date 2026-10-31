@@ -6,6 +6,7 @@ build-backend = "maturin"
 name = "z3-map-gen"
 version = "0.1.0"
 requires-python = ">=3.12"
+dependencies = ["torch"]
 
 [tool.maturin]
 module-name = "z3_map_gen"

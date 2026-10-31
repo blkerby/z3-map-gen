@@ -156,12 +156,47 @@ impl Environment {
         features
     }
 
-    pub fn extract_candidate_features(&self) -> Vec<(Action, Features)> {
+    pub fn find_failed_outcomes(&self) -> Vec<bool> {
+        let room_count = self.catalog.rooms.len();
+        let mut failed = Vec::with_capacity(room_count + self.cells.len());
+        for position in &self.positions {
+            failed.push(position.is_none());
+        }
+        for cell in &self.cells {
+            failed.push(cell.is_none());
+        }
+        for (room_index, room) in self.catalog.rooms.iter().enumerate() {
+            if self.positions[room_index].is_some() {
+                continue;
+            }
+            let [width, height] = room.size;
+            for y in 0..BOARD_SIZE {
+                for x in 0..BOARD_SIZE {
+                    if !self.can_place(room_index, x, y) {
+                        continue;
+                    }
+                    failed[room_index] = false;
+                    for dy in 0..height {
+                        for dx in 0..width {
+                            failed[room_count + (y + dy) * BOARD_SIZE + x + dx] = false;
+                        }
+                    }
+                }
+            }
+        }
+        failed
+    }
+
+    pub fn extract_candidate_features(&self) -> Vec<(Action, Features, Vec<bool>)> {
         let mut candidates = Vec::new();
         for action in self.list_candidates() {
             let mut speculative = self.clone();
             speculative.apply_action(action);
-            candidates.push((action, speculative.extract_features()));
+            candidates.push((
+                action,
+                speculative.extract_features(),
+                speculative.find_failed_outcomes(),
+            ));
         }
         candidates
     }
