@@ -93,7 +93,6 @@ pub enum Action {
     Dummy,
 }
 
-#[pyo3::pyclass(frozen, get_all, skip_from_py_object, module = "z3_map_gen")]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Features {
     pub room_cells: Vec<i64>,

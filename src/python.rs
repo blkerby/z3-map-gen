@@ -1,4 +1,4 @@
-use crate::{Action, BOARD_SIZE, Catalog, EPISODE_LENGTH, Environment, Features};
+use crate::{Action, BOARD_SIZE, Catalog, EPISODE_LENGTH, Environment};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use std::path::PathBuf;
@@ -43,13 +43,27 @@ impl PyCatalog {
 #[pyclass(name = "CandidateFeatures", frozen, get_all, module = "z3_map_gen")]
 struct PyCandidateFeatures {
     actions: Vec<(usize, usize, usize)>,
-    features: Vec<Features>,
+    environment_offsets: Vec<usize>,
+    features: PyFeatures,
     failed_outcomes: Vec<Vec<bool>>,
 }
 
-#[pyclass(name = "Environment", module = "z3_map_gen")]
-struct PyEnvironment {
-    inner: Environment,
+#[pyclass(
+    name = "Features",
+    frozen,
+    get_all,
+    skip_from_py_object,
+    module = "z3_map_gen"
+)]
+#[derive(Clone)]
+struct PyFeatures {
+    room_cells: Vec<Vec<i64>>,
+    room_positions: Vec<Vec<i64>>,
+}
+
+#[pyclass(name = "EnvironmentGroup", module = "z3_map_gen")]
+struct PyEnvironmentGroup {
+    environments: Vec<Environment>,
 }
 
 fn decode_action(action: Option<(usize, usize, usize)>) -> Action {
@@ -60,68 +74,91 @@ fn decode_action(action: Option<(usize, usize, usize)>) -> Action {
 }
 
 #[pymethods]
-impl PyEnvironment {
+impl PyEnvironmentGroup {
     #[new]
-    fn new(catalog: &PyCatalog) -> Self {
+    fn new(catalog: &PyCatalog, environment_count: usize) -> Self {
         Self {
-            inner: Environment::new(catalog.inner.clone()),
+            environments: vec![Environment::new(catalog.inner.clone()); environment_count],
         }
     }
 
-    fn list_candidates(&self) -> Vec<(usize, usize, usize)> {
-        let mut actions = Vec::new();
-        for action in self.inner.list_candidates() {
-            if let Action::Place { room_id, x, y } = action {
-                actions.push((room_id, x, y));
-            }
+    fn extract_features(&self) -> PyFeatures {
+        let mut room_cells = Vec::new();
+        let mut room_positions = Vec::new();
+        for environment in &self.environments {
+            let features = environment.extract_features();
+            room_cells.push(features.room_cells);
+            room_positions.push(features.room_positions);
         }
-        actions
-    }
-
-    fn extract_features(&self) -> Features {
-        self.inner.extract_features()
+        PyFeatures {
+            room_cells,
+            room_positions,
+        }
     }
 
     fn extract_candidate_features(&self) -> PyCandidateFeatures {
         let mut actions = Vec::new();
-        let mut features = Vec::new();
+        let mut environment_offsets = vec![0];
+        let mut room_cells = Vec::new();
+        let mut room_positions = Vec::new();
         let mut failed_outcomes = Vec::new();
-        for (action, state_features, failed) in self.inner.extract_candidate_features() {
-            if let Action::Place { room_id, x, y } = action {
-                actions.push((room_id, x, y));
-                features.push(state_features);
-                failed_outcomes.push(failed);
+        for environment in &self.environments {
+            for (action, features, failed) in environment.extract_candidate_features() {
+                if let Action::Place { room_id, x, y } = action {
+                    actions.push((room_id, x, y));
+                    room_cells.push(features.room_cells);
+                    room_positions.push(features.room_positions);
+                    failed_outcomes.push(failed);
+                }
             }
+            environment_offsets.push(actions.len());
         }
         PyCandidateFeatures {
             actions,
-            features,
+            environment_offsets,
+            features: PyFeatures {
+                room_cells,
+                room_positions,
+            },
             failed_outcomes,
         }
     }
 
-    #[pyo3(signature = (action))]
-    fn apply_action(&mut self, action: Option<(usize, usize, usize)>) {
-        self.inner.apply_action(decode_action(action));
+    fn apply_actions(&mut self, actions: Vec<Option<(usize, usize, usize)>>) -> PyResult<()> {
+        if actions.len() != self.environments.len() {
+            return Err(PyValueError::new_err("expected one action per environment"));
+        }
+        for (environment, action) in self.environments.iter_mut().zip(actions) {
+            environment.apply_action(decode_action(action));
+        }
+        Ok(())
     }
 
     #[staticmethod]
-    fn replay(catalog: &PyCatalog, actions: Vec<Option<(usize, usize, usize)>>) -> PyResult<Self> {
-        let mut decoded = Vec::new();
-        for action in actions {
-            decoded.push(decode_action(action));
+    fn replay(
+        catalog: &PyCatalog,
+        episodes: Vec<Vec<Option<(usize, usize, usize)>>>,
+    ) -> PyResult<Self> {
+        let mut environments = Vec::new();
+        for actions in episodes {
+            let mut decoded = Vec::new();
+            for action in actions {
+                decoded.push(decode_action(action));
+            }
+            environments.push(
+                Environment::replay(catalog.inner.clone(), &decoded)
+                    .map_err(PyValueError::new_err)?,
+            );
         }
-        let inner =
-            Environment::replay(catalog.inner.clone(), &decoded).map_err(PyValueError::new_err)?;
-        Ok(Self { inner })
+        Ok(Self { environments })
     }
 }
 
 #[pymodule]
 fn z3_map_gen(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyCatalog>()?;
-    module.add_class::<PyEnvironment>()?;
-    module.add_class::<Features>()?;
+    module.add_class::<PyEnvironmentGroup>()?;
+    module.add_class::<PyFeatures>()?;
     module.add_class::<PyCandidateFeatures>()?;
     module.add("BOARD_SIZE", BOARD_SIZE)?;
     module.add("EPISODE_LENGTH", EPISODE_LENGTH)?;
