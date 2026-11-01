@@ -7,6 +7,7 @@ import os
 import random
 import signal
 import sys
+from bisect import bisect_right
 from datetime import datetime
 from pathlib import Path
 
@@ -32,15 +33,59 @@ def load_config(path):
         for key in keys:
             if type(config[group][key]) is not int or config[group][key] <= 0:
                 raise ValueError(f"{group}.{key} must be a positive integer")
-    for group, key in (("generation", "temperature"), ("optimizer", "learning_rate")):
-        value = config[group][key]
-        if not math.isfinite(value) or value <= 0:
-            raise ValueError(f"{group}.{key} must be positive and finite")
+    temperature = config["generation"]["temperature"]
+    if not math.isfinite(temperature) or temperature <= 0:
+        raise ValueError("generation.temperature must be positive and finite")
+    optimizer_keys = ("learning_rate", "beta1", "beta2")
+    if any(isinstance(config["optimizer"][key], dict) for key in optimizer_keys):
+        knots = config["knot_episodes"]
+        if not isinstance(knots, list) or not knots:
+            raise ValueError("knot_episodes must be a nonempty list")
+        previous = -1
+        for knot in knots:
+            if type(knot) is not int or knot <= previous:
+                raise ValueError("knot_episodes must be strictly increasing nonnegative integers")
+            previous = knot
+    for key in optimizer_keys:
+        setting = config["optimizer"][key]
+        kind = None
+        values = [setting]
+        if isinstance(setting, dict):
+            if len(setting) != 1 or next(iter(setting)) not in ("linear", "log", "step"):
+                raise ValueError(f"optimizer.{key} must have exactly one of linear, log, or step")
+            kind, values = next(iter(setting.items()))
+            if not isinstance(values, list) or len(values) != len(knots):
+                raise ValueError(f"optimizer.{key} values must match knot_episodes")
+        for value in values:
+            if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
+                raise ValueError(f"optimizer.{key} values must be nonnegative and finite")
+            if key in ("beta1", "beta2") and value >= 1:
+                raise ValueError(f"optimizer.{key} values must be less than one")
+            if kind == "log" and value == 0:
+                raise ValueError(f"optimizer.{key} values must be positive for a log schedule")
     floor = config["generation"]["log_success_floor"]
     if not math.isfinite(floor) or floor >= 0:
         raise ValueError("generation.log_success_floor must be finite and negative")
     config["room_data"] = str(Path(config["room_data"]).resolve())
     return config
+
+
+def instantiate_schedule(value, knots, position):
+    if not isinstance(value, dict):
+        return value
+    kind, values = next(iter(value.items()))
+    index = max(0, bisect_right(knots, position) - 1)
+    if kind == "step" or position <= knots[0] or index == len(knots) - 1:
+        return values[index]
+    fraction = (position - knots[index]) / (knots[index + 1] - knots[index])
+    start, end = values[index:index + 2]
+    if kind == "log":
+        return math.exp((1 - fraction) * math.log(start) + fraction * math.log(end))
+    return (1 - fraction) * start + fraction * end
+
+
+def instantiate_schedules(settings, knots, position):
+    return {key: instantiate_schedule(value, knots, position) for key, value in settings.items()}
 
 
 class TrainingSession:
@@ -56,7 +101,7 @@ class TrainingSession:
         random.seed(config["seed"])
         torch.manual_seed(config["seed"])
         self.model = OutcomeModel(self.catalog, **config["model"]).to(self.device)
-        settings = config["optimizer"]
+        settings = instantiate_schedules(config["optimizer"], config.get("knot_episodes"), 0)
         self.optimizer = torch.optim.Adam(
             self.model.parameters(),
             lr=settings["learning_rate"],
@@ -118,6 +163,14 @@ class TrainingSession:
 
     def train_round(self, round_number):
         self.model.train()
+        generation = self.config["generation"]
+        num_episodes = round_number * generation["environment_count"] * generation["batches_per_round"]
+        optimizer_settings = instantiate_schedules(
+            self.config["optimizer"], self.config.get("knot_episodes"), num_episodes,
+        )
+        for group in self.optimizer.param_groups:
+            group["lr"] = optimizer_settings["learning_rate"]
+            group["betas"] = (optimizer_settings["beta1"], optimizer_settings["beta2"])
         settings = self.config["train"]
         first_round = max(1, round_number - settings["experience_rounds"] + 1)
         for old_round in list(self.experience):
@@ -149,6 +202,7 @@ class TrainingSession:
             self.optimizer.step()
             total_loss += loss.item()
         return {
+            **optimizer_settings,
             "loss_per_prefix": total_loss / (settings["batches_per_round"] * settings["batch_size"]),
         }
 
@@ -188,9 +242,9 @@ class TrainingSession:
             (self.run_dir / "metrics" / f"round_{number}.json").write_text(json.dumps(metrics) + "\n")
             self.completed_round = number
             logging.info(
-                "Round %s: complete=%.3f rooms=%.2f cells=%.2f loss=%.4f", number,
+                "Round %s: complete=%.3f rooms=%.2f cells=%.2f loss=%.4f lr=%.6g", number,
                 metrics["complete_map_frequency"], metrics["mean_rooms_unplaced"],
-                metrics["mean_unoccupied_cells"], metrics["loss_per_prefix"],
+                metrics["mean_unoccupied_cells"], metrics["loss_per_prefix"], metrics["learning_rate"],
             )
             if number % self.config["checkpoint_period"] == 0:
                 self.save_checkpoint()

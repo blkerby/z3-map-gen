@@ -4,6 +4,7 @@
   "seed": 0,
   "rounds": 10000000,
   "checkpoint_period": 100,
+  "knot_episodes": [0, 200000],
   "model": {
     "room_embedding_dim": 16,
     "position_embedding_dim": 8,
@@ -11,7 +12,7 @@
     "hidden_width": 256
   },
   "optimizer": {
-    "learning_rate": 0.0005,
+    "learning_rate": {"log": [0.0005, 0.00005]},
     "beta1": 0.9,
     "beta2": 0.999
   },
