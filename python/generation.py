@@ -19,14 +19,14 @@ def score_candidates(
     if candidates.environment_offsets[-1] == 0:
         return torch.empty(0, device=device)
     features = candidates.features
-    room_cells = torch.tensor(features.room_cells, dtype=torch.long).to(device)
-    n = room_cells.shape[0]
     room_positions = torch.tensor(features.room_positions, dtype=torch.long).to(device)
+    room_cells = torch.tensor(features.room_cells, dtype=torch.long).to(device)
+    n = room_positions.shape[0]
     failed_cells = room_cells == CELL_FAILED
     failed_position = torch.zeros([n, NUM_ROOMS], dtype=torch.bool, device=device)
     failed = torch.cat([failed_position, failed_cells], dim=-1)
     successful = torch.cat((room_positions >= 0, room_cells >= 0), dim=-1)
-    logits = model(room_cells, room_positions)
+    logits = model(room_positions, room_cells)
     log_success = F.logsigmoid(logits).clamp_min(log_success_floor)
     log_success = log_success.masked_fill(failed, log_success_floor)
     log_success = log_success.masked_fill(successful, 0)
