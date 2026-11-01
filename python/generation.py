@@ -5,6 +5,9 @@ from model import OutcomeModel
 from z3_map_gen import CandidateFeatures, EnvironmentGroup
 
 
+CELL_FAILED = -1
+NUM_ROOMS = 40
+
 @torch.no_grad()
 def score_candidates(
     model: OutcomeModel,
@@ -16,12 +19,15 @@ def score_candidates(
     if candidates.environment_offsets[-1] == 0:
         return torch.empty(0, device=device)
     features = candidates.features
-    room_cells = torch.tensor(features.room_cells, dtype=torch.long, device=device)
-    room_positions = torch.tensor(features.room_positions, dtype=torch.long, device=device)
-    failed = torch.tensor(candidates.failed_outcomes, dtype=torch.bool, device=device)
+    room_cells = torch.tensor(features.room_cells, dtype=torch.long).to(device)
+    n = room_cells.shape[0]
+    room_positions = torch.tensor(features.room_positions, dtype=torch.long).to(device)
+    failed_cells = room_cells == CELL_FAILED
+    failed_position = torch.zeros([n, NUM_ROOMS], dtype=torch.bool, device=device)
+    failed = torch.cat([failed_cells, failed_position], dim=-1)
     successful = torch.cat((room_positions >= 0, room_cells >= 0), dim=-1)
     logits = model(room_cells, room_positions)
-    log_success = F.logsigmoid(logits).clamp_min(log_success_floor)
+    log_success = F.logsigmoid(logits)
     log_success = log_success.masked_fill(failed, log_success_floor)
     log_success = log_success.masked_fill(successful, 0)
     return log_success.sum(dim=-1)

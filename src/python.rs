@@ -31,7 +31,7 @@ impl PyCatalog {
     }
 
     #[getter(room_cell_count)]
-    fn get_room_cell_count(&self) -> usize {
+    fn get_room_cell_count(&self) -> i8 {
         let mut count = 0;
         for room in &self.inner.rooms {
             count += room.size[0] * room.size[1];
@@ -42,10 +42,9 @@ impl PyCatalog {
 
 #[pyclass(name = "CandidateFeatures", frozen, get_all, module = "z3_map_gen")]
 struct PyCandidateFeatures {
-    actions: Vec<(usize, usize, usize)>,
+    actions: Vec<(i8, i8, i8)>,
     environment_offsets: Vec<usize>,
     features: PyFeatures,
-    failed_outcomes: Vec<Vec<bool>>,
 }
 
 #[pyclass(
@@ -57,8 +56,8 @@ struct PyCandidateFeatures {
 )]
 #[derive(Clone)]
 struct PyFeatures {
-    room_cells: Vec<Vec<i64>>,
-    room_positions: Vec<Vec<i64>>,
+    room_cells: Vec<Vec<i8>>,
+    room_positions: Vec<Vec<i8>>,
 }
 
 #[pyclass(name = "EnvironmentGroup", module = "z3_map_gen")]
@@ -66,9 +65,9 @@ struct PyEnvironmentGroup {
     environments: Vec<Environment>,
 }
 
-fn decode_action(action: Option<(usize, usize, usize)>) -> Action {
+fn decode_action(action: Option<(i8, i8, i8)>) -> Action {
     match action {
-        Some((room_id, x, y)) => Action::Place { room_id, x, y },
+        Some((room_index, x, y)) => Action::Place { room_index, x, y },
         None => Action::Dummy,
     }
 }
@@ -96,19 +95,17 @@ impl PyEnvironmentGroup {
         }
     }
 
-    fn extract_candidate_features(&self) -> PyCandidateFeatures {
+    fn extract_candidate_features(&mut self) -> PyCandidateFeatures {
         let mut actions = Vec::new();
         let mut environment_offsets = vec![0];
         let mut room_cells = Vec::new();
         let mut room_positions = Vec::new();
-        let mut failed_outcomes = Vec::new();
-        for environment in &self.environments {
-            for (action, features, failed) in environment.extract_candidate_features() {
-                if let Action::Place { room_id, x, y } = action {
-                    actions.push((room_id, x, y));
+        for environment in &mut self.environments {
+            for (action, features) in environment.extract_candidate_features() {
+                if let Action::Place { room_index, x, y } = action {
+                    actions.push((room_index, x, y));
                     room_cells.push(features.room_cells);
                     room_positions.push(features.room_positions);
-                    failed_outcomes.push(failed);
                 }
             }
             environment_offsets.push(actions.len());
@@ -120,11 +117,10 @@ impl PyEnvironmentGroup {
                 room_cells,
                 room_positions,
             },
-            failed_outcomes,
         }
     }
 
-    fn apply_actions(&mut self, actions: Vec<Option<(usize, usize, usize)>>) -> PyResult<()> {
+    fn apply_actions(&mut self, actions: Vec<Option<(i8, i8, i8)>>) -> PyResult<()> {
         if actions.len() != self.environments.len() {
             return Err(PyValueError::new_err("expected one action per environment"));
         }
@@ -135,10 +131,7 @@ impl PyEnvironmentGroup {
     }
 
     #[staticmethod]
-    fn replay(
-        catalog: &PyCatalog,
-        episodes: Vec<Vec<Option<(usize, usize, usize)>>>,
-    ) -> PyResult<Self> {
+    fn replay(catalog: &PyCatalog, episodes: Vec<Vec<Option<(i8, i8, i8)>>>) -> PyResult<Self> {
         let mut environments = Vec::new();
         for actions in episodes {
             let mut decoded = Vec::new();

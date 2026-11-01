@@ -180,8 +180,8 @@ class TrainingSession:
             metrics.update({
                 "round": number,
                 "complete_map_frequency": outcomes[:, :room_count].all(dim=1).float().mean().item(),
-                "mean_rooms_placed": outcomes[:, :room_count].sum(dim=1).mean().item(),
-                "mean_occupied_cells": outcomes[:, room_count:].sum(dim=1).mean().item(),
+                "mean_rooms_unplaced": (1.0 - outcomes[:, :room_count]).sum(dim=1).mean().item(),
+                "mean_unoccupied_cells": (1.0 - outcomes[:, room_count:]).sum(dim=1).mean().item(),
                 "room_placement_frequency": outcomes[:, :room_count].mean(dim=0).tolist(),
                 "cell_fill_frequency": outcomes[:, room_count:].mean(dim=0).tolist(),
             })
@@ -189,8 +189,8 @@ class TrainingSession:
             self.completed_round = number
             logging.info(
                 "Round %s: complete=%.3f rooms=%.2f cells=%.2f loss=%.4f", number,
-                metrics["complete_map_frequency"], metrics["mean_rooms_placed"],
-                metrics["mean_occupied_cells"], metrics["loss_per_prefix"],
+                metrics["complete_map_frequency"], metrics["mean_rooms_unplaced"],
+                metrics["mean_unoccupied_cells"], metrics["loss_per_prefix"],
             )
             if number % self.config["checkpoint_period"] == 0:
                 self.save_checkpoint()
@@ -210,7 +210,6 @@ def main():
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(message)s",
-        datefmt="%H:%M:%S",
         handlers=[
             logging.StreamHandler(sys.stdout),
             logging.FileHandler(session.run_dir / "train.log", encoding="utf-8"),
