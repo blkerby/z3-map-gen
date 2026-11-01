@@ -24,10 +24,10 @@ def score_candidates(
     room_positions = torch.tensor(features.room_positions, dtype=torch.long).to(device)
     failed_cells = room_cells == CELL_FAILED
     failed_position = torch.zeros([n, NUM_ROOMS], dtype=torch.bool, device=device)
-    failed = torch.cat([failed_cells, failed_position], dim=-1)
+    failed = torch.cat([failed_position, failed_cells], dim=-1)
     successful = torch.cat((room_positions >= 0, room_cells >= 0), dim=-1)
     logits = model(room_cells, room_positions)
-    log_success = F.logsigmoid(logits)
+    log_success = F.logsigmoid(logits).clamp_min(log_success_floor)
     log_success = log_success.masked_fill(failed, log_success_floor)
     log_success = log_success.masked_fill(successful, 0)
     return log_success.sum(dim=-1)
