@@ -34,11 +34,13 @@ def load_config(path):
         for key in keys:
             if type(config[group][key]) is not int or config[group][key] <= 0:
                 raise ValueError(f"{group}.{key} must be a positive integer")
-    temperature = config["generation"]["temperature"]
-    if not math.isfinite(temperature) or temperature <= 0:
-        raise ValueError("generation.temperature must be positive and finite")
-    optimizer_keys = ("learning_rate", "beta1", "beta2")
-    if any(isinstance(config["optimizer"][key], dict) for key in optimizer_keys):
+    scheduled_settings = (
+        ("optimizer", "learning_rate"),
+        ("optimizer", "beta1"),
+        ("optimizer", "beta2"),
+        ("generation", "temperature"),
+    )
+    if any(isinstance(config[group][key], dict) for group, key in scheduled_settings):
         knots = config["knot_episodes"]
         if not isinstance(knots, list) or not knots:
             raise ValueError("knot_episodes must be a nonempty list")
@@ -47,23 +49,25 @@ def load_config(path):
             if type(knot) is not int or knot <= previous:
                 raise ValueError("knot_episodes must be strictly increasing nonnegative integers")
             previous = knot
-    for key in optimizer_keys:
-        setting = config["optimizer"][key]
+    for group, key in scheduled_settings:
+        setting = config[group][key]
         kind = None
         values = [setting]
         if isinstance(setting, dict):
             if len(setting) != 1 or next(iter(setting)) not in ("linear", "log", "step"):
-                raise ValueError(f"optimizer.{key} must have exactly one of linear, log, or step")
+                raise ValueError(f"{group}.{key} must have exactly one of linear, log, or step")
             kind, values = next(iter(setting.items()))
             if not isinstance(values, list) or len(values) != len(knots):
-                raise ValueError(f"optimizer.{key} values must match knot_episodes")
+                raise ValueError(f"{group}.{key} values must match knot_episodes")
         for value in values:
             if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
-                raise ValueError(f"optimizer.{key} values must be nonnegative and finite")
+                raise ValueError(f"{group}.{key} values must be nonnegative and finite")
+            if key == "temperature" and value == 0:
+                raise ValueError("generation.temperature values must be positive")
             if key in ("beta1", "beta2") and value >= 1:
                 raise ValueError(f"optimizer.{key} values must be less than one")
             if kind == "log" and value == 0:
-                raise ValueError(f"optimizer.{key} values must be positive for a log schedule")
+                raise ValueError(f"{group}.{key} values must be positive for a log schedule")
     floor = config["generation"]["log_success_floor"]
     if not math.isfinite(floor) or floor >= 0:
         raise ValueError("generation.log_success_floor must be finite and negative")
@@ -119,7 +123,7 @@ class TrainingSession:
             self.run_dir.mkdir(parents=True, exist_ok=False)
         else:
             self.completed_round, unique_maps = load_checkpoint(
-                resume, self.model, self.optimizer, config, self.catalog_hash,
+                resume, self.model, self.optimizer, config,
             )
             if unique_maps is not None:
                 self.unique_maps = unique_maps
@@ -149,6 +153,10 @@ class TrainingSession:
     def generate_round(self):
         self.model.eval()
         settings = self.config["generation"]
+        num_episodes = self.completed_round * settings["environment_count"] * settings["batches_per_round"]
+        temperature = instantiate_schedule(
+            settings["temperature"], self.config.get("knot_episodes"), num_episodes,
+        )
         action_batches = []
         outcome_batches = []
         for _ in range(settings["batches_per_round"]):
@@ -157,7 +165,7 @@ class TrainingSession:
             for _ in range(EPISODE_LENGTH):
                 actions = sample_actions(
                     environments, self.model,
-                    temperature=settings["temperature"],
+                    temperature=temperature,
                     log_success_floor=settings["log_success_floor"],
                 )
                 environments.apply_actions(actions)

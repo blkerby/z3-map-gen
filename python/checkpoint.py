@@ -44,13 +44,9 @@ def save_checkpoint(path, model, optimizer, completed_round, config, catalog_has
     save_tensors(path, tensors, metadata)
 
 
-def load_checkpoint(path, model, optimizer, config, catalog_hash):
+def load_checkpoint(path, model, optimizer, config):
     with safe_open(path, framework="pt", device="cpu") as file:
         metadata = file.metadata()
-        previous = json.loads(metadata["config"])
-        previous["rounds"] = config["rounds"]
-        if previous != config or metadata["catalog_hash"] != catalog_hash:
-            raise ValueError("Resume requires the same config and catalog, except for total rounds")
         completed_round = int(metadata["completed_round"])
         if completed_round > config["rounds"]:
             raise ValueError("Configured rounds precede the checkpoint")
