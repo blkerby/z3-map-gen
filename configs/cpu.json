@@ -19,7 +19,7 @@
   "generation": {
     "environment_count": 1024,
     "batches_per_round": 1,
-    "temperature": {"log": [1.0, 0.1]},
+    "temperature": {"log": [0.2, 0.1]},
     "log_success_floor": -50.0
   },
   "train": {

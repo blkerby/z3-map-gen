@@ -27,6 +27,8 @@ class OutcomeModel(nn.Module):
             layers.extend([nn.Linear(input_width, hidden_width), nn.ReLU()])
             input_width = hidden_width
         layers.append(nn.Linear(input_width, room_count + cell_count))
+        nn.init.zeros_(layers[-1].weight)
+        nn.init.zeros_(layers[-1].bias)
         self.mlp = nn.Sequential(*layers)
 
     def forward(self, room_positions: torch.Tensor, room_cells: torch.Tensor) -> torch.Tensor:
