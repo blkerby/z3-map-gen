@@ -17,14 +17,14 @@
     "beta2": 0.999
   },
   "generation": {
-    "environment_count": 8192,
+    "environment_count": 2048,
     "batches_per_round": 1,
-    "temperature": 0.1,
+    "temperature": {"log": [0.2, 0.1]},
     "log_success_floor": -50.0
   },
   "train": {
     "batch_size": 256,
-    "batches_per_round": 10,
+    "batches_per_round": 40,
     "experience_rounds": 10
   }
 }
