@@ -327,6 +327,7 @@ def main():
         ],
     )
     logging.info("Run directory: %s", session.run_dir)
+    logging.info("Config:\n%s", json.dumps(session.config, indent=2))
     signal.signal(signal.SIGINT, session.request_stop)
     signal.signal(signal.SIGTERM, session.request_stop)
     session.run()
