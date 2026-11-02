@@ -108,6 +108,7 @@ class TrainingSession:
         random.seed(config["seed"])
         torch.manual_seed(config["seed"])
         self.model = OutcomeModel(self.catalog, **config["model"]).to(self.device)
+        self.model.compile(dynamic=True)
         settings = instantiate_schedules(config["optimizer"], config.get("knot_episodes"), 0)
         self.optimizer = torch.optim.Adam(
             self.model.parameters(),
