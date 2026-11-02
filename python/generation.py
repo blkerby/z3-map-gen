@@ -21,9 +21,14 @@ def score_candidates(
     features = candidates.features
     room_positions = features.room_positions.to(device)
     room_cells = features.room_cells.to(device)
+    return _score_features(model, room_positions, room_cells, log_success_floor)
+
+
+@torch.compile(dynamic=True)
+def _score_features(model, room_positions, room_cells, log_success_floor):
     n = room_positions.shape[0]
     failed_cells = room_cells == CELL_FAILED
-    failed_position = torch.zeros([n, NUM_ROOMS], dtype=torch.bool, device=device)
+    failed_position = torch.zeros([n, NUM_ROOMS], dtype=torch.bool, device=room_positions.device)
     failed = torch.cat([failed_position, failed_cells], dim=-1)
     successful = torch.cat((room_positions >= 0, room_cells >= 0), dim=-1)
     logits = model(room_positions, room_cells)
