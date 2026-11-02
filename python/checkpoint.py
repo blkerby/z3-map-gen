@@ -17,7 +17,7 @@ def save_tensors(path: Path, tensors: dict, metadata: dict):
     os.replace(temporary, path)
 
 
-def save_checkpoint(path, model, optimizer, completed_round, config, catalog_hash, room_ids):
+def save_checkpoint(path, model, optimizer, completed_round, config, catalog_hash, room_ids, unique_maps):
     tensors = {}
     for name, tensor in model.state_dict().items():
         tensors[f"model.{name}"] = tensor
@@ -26,6 +26,10 @@ def save_checkpoint(path, model, optimizer, completed_round, config, catalog_has
         for name, tensor in state.items():
             tensors[f"optimizer.{index}.{name}"] = tensor
     tensors["rng.cpu"] = torch.get_rng_state()
+    if unique_maps is not None:
+        tensors["unique_maps"] = torch.tensor(
+            [list(layout) for layout in sorted(unique_maps)], dtype=torch.uint8,
+        ).reshape(-1, len(room_ids))
     device = model.room_embedding.weight.device
     if device.type == "cuda":
         tensors["rng.device"] = torch.cuda.get_rng_state(device)
@@ -50,6 +54,9 @@ def load_checkpoint(path, model, optimizer, config, catalog_hash):
         completed_round = int(metadata["completed_round"])
         if completed_round > config["rounds"]:
             raise ValueError("Configured rounds precede the checkpoint")
+        unique_maps = None
+        if "unique_maps" in file.keys():
+            unique_maps = {bytes(row) for row in file.get_tensor("unique_maps").tolist()}
         model_state = {}
         optimizer_state = {}
         for key in file.keys():
@@ -69,4 +76,4 @@ def load_checkpoint(path, model, optimizer, config, catalog_hash):
             torch.cuda.set_rng_state(file.get_tensor("rng.device"), device)
         version, state, gaussian = json.loads(metadata["python_rng"])
         random.setstate((version, tuple(state), gaussian))
-    return completed_round
+    return completed_round, unique_maps

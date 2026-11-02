@@ -12,10 +12,11 @@ from datetime import datetime
 from pathlib import Path
 
 import torch
+from safetensors import safe_open
 from torch.nn import functional as F
 
 from checkpoint import load_checkpoint, save_checkpoint, save_tensors
-from experience import ExperienceRound
+from experience import ExperienceRound, collect_unique_maps
 from generation import sample_actions
 from model import OutcomeModel
 from z3_map_gen import EPISODE_LENGTH, Catalog, EnvironmentGroup
@@ -89,8 +90,10 @@ def instantiate_schedules(settings, knots, position):
 
 
 class TrainingSession:
-    def __init__(self, config, resume):
+    def __init__(self, config, resume, log_unique_maps=False, log_cumulative_unique_maps=False):
         self.config = config
+        self.log_unique_maps = log_unique_maps
+        self.unique_maps = set() if log_cumulative_unique_maps else None
         if resume is None:
             self.run_dir = Path("runs") / datetime.now().strftime("%Y%m%d-%H%M%S-%f")
         else:
@@ -115,9 +118,20 @@ class TrainingSession:
         if resume is None:
             self.run_dir.mkdir(parents=True, exist_ok=False)
         else:
-            self.completed_round = load_checkpoint(
+            self.completed_round, unique_maps = load_checkpoint(
                 resume, self.model, self.optimizer, config, self.catalog_hash,
             )
+            if unique_maps is not None:
+                self.unique_maps = unique_maps
+            elif log_cumulative_unique_maps:
+                for number in range(1, self.completed_round + 1):
+                    path = self.run_dir / "experience" / f"round_{number}.safetensors"
+                    with safe_open(path, framework="pt", device="cpu") as file:
+                        if file.metadata()["catalog_hash"] != self.catalog_hash:
+                            raise ValueError(f"Experience catalog does not match: {path}")
+                        self.unique_maps.update(collect_unique_maps(
+                            file.get_tensor("actions"), file.get_tensor("outcomes"),
+                        ))
         for name in ("experience", "checkpoints", "metrics"):
             (self.run_dir / name).mkdir(exist_ok=True)
         (self.run_dir / "config.json").write_text(json.dumps(config, indent=2) + "\n")
@@ -211,6 +225,7 @@ class TrainingSession:
         save_checkpoint(
             path, self.model, self.optimizer, self.completed_round, self.config,
             self.catalog_hash, self.catalog.room_ids,
+            self.unique_maps,
         )
 
     def run(self):
@@ -239,12 +254,23 @@ class TrainingSession:
                 "room_placement_frequency": outcomes[:, :room_count].mean(dim=0).tolist(),
                 "cell_fill_frequency": outcomes[:, room_count:].mean(dim=0).tolist(),
             })
+            unique_log = ""
+            if self.log_unique_maps or self.unique_maps is not None:
+                unique_maps = collect_unique_maps(data["actions"], data["outcomes"])
+                if self.log_unique_maps:
+                    metrics["unique_maps"] = len(unique_maps)
+                    unique_log += f" unique={len(unique_maps)}"
+                if self.unique_maps is not None:
+                    self.unique_maps.update(unique_maps)
+                    metrics["cumulative_unique_maps"] = len(self.unique_maps)
+                    unique_log += f" cumulative_unique={len(self.unique_maps)}"
             (self.run_dir / "metrics" / f"round_{number}.json").write_text(json.dumps(metrics) + "\n")
             self.completed_round = number
             logging.info(
-                "Round %s: complete=%.3f rooms=%.2f cells=%.2f loss=%.4f lr=%.6g", number,
+                "Round %s: complete=%.3f rooms=%.2f cells=%.2f loss=%.4f lr=%.6g%s", number,
                 metrics["complete_map_frequency"], metrics["mean_rooms_unplaced"],
                 metrics["mean_unoccupied_cells"], metrics["loss_per_prefix"], metrics["learning_rate"],
+                unique_log,
             )
             if number % self.config["checkpoint_period"] == 0:
                 self.save_checkpoint()
@@ -259,8 +285,15 @@ def main():
     parser = argparse.ArgumentParser(description="Train the overworld outcome predictor")
     parser.add_argument("config", type=Path)
     parser.add_argument("--resume", type=Path, help="Resume a safetensors checkpoint in the same run")
+    parser.add_argument("--log-unique-maps", action="store_true", help="Log unique valid maps in each round")
+    parser.add_argument(
+        "--log-cumulative-unique-maps", action="store_true",
+        help="Log unique valid maps since the run began; resume saved tracking or reconstruct from experience",
+    )
     args = parser.parse_args()
-    session = TrainingSession(load_config(args.config), args.resume)
+    session = TrainingSession(
+        load_config(args.config), args.resume, args.log_unique_maps, args.log_cumulative_unique_maps,
+    )
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(message)s",

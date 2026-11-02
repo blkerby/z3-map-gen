@@ -5,6 +5,18 @@ from pathlib import Path
 
 import torch
 from safetensors import safe_open
+from z3_map_gen import BOARD_SIZE
+
+
+def collect_unique_maps(actions, outcomes):
+    valid_actions = actions[outcomes.all(dim=1)]
+    # Room-ordered anchors identify layouts independently of placement order.
+    positions = torch.empty(valid_actions.shape[:2], dtype=torch.uint8)
+    positions.scatter_(
+        1, valid_actions[:, :, 0],
+        (valid_actions[:, :, 2] * BOARD_SIZE + valid_actions[:, :, 1]).to(torch.uint8),
+    )
+    return {bytes(row) for row in positions.unique(dim=0).tolist()}
 
 
 @dataclass
