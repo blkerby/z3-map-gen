@@ -1,6 +1,7 @@
 use crate::{Action, BOARD_SIZE, Catalog, EPISODE_LENGTH, Environment};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use pyo3::types::PyList;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -75,10 +76,15 @@ fn decode_action(action: Option<(i8, i8, i8)>) -> Action {
 #[pymethods]
 impl PyEnvironmentGroup {
     #[new]
-    fn new(catalog: &PyCatalog, environment_count: usize) -> Self {
-        Self {
-            environments: vec![Environment::new(catalog.inner.clone()); environment_count],
+    fn new(py: Python<'_>, catalog: &PyCatalog, environment_count: usize) -> PyResult<Self> {
+        let sample = py.import("random")?.getattr("sample")?;
+        let cells = PyList::new(py, 0..(BOARD_SIZE * BOARD_SIZE) as usize)?;
+        let mut environments = Vec::with_capacity(environment_count);
+        for _ in 0..environment_count {
+            let cell_order = sample.call1((&cells, cells.len()))?.extract()?;
+            environments.push(Environment::new(catalog.inner.clone(), cell_order));
         }
+        Ok(Self { environments })
     }
 
     fn extract_features(&self) -> PyFeatures {

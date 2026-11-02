@@ -106,6 +106,7 @@ pub struct Features {
 pub struct Environment {
     catalog: Arc<Catalog>,
     cells: [i8; (BOARD_SIZE * BOARD_SIZE) as usize],
+    cell_order: [usize; (BOARD_SIZE * BOARD_SIZE) as usize],
     positions: Vec<Option<[i8; 2]>>,
 }
 
@@ -117,11 +118,15 @@ enum Direction {
 }
 
 impl Environment {
-    pub fn new(catalog: Arc<Catalog>) -> Self {
+    pub fn new(
+        catalog: Arc<Catalog>,
+        cell_order: [usize; (BOARD_SIZE * BOARD_SIZE) as usize],
+    ) -> Self {
         let positions = vec![None; catalog.rooms.len()];
         Self {
             catalog,
             cells: [CELL_EMPTY; (BOARD_SIZE * BOARD_SIZE) as usize],
+            cell_order,
             positions,
         }
     }
@@ -239,29 +244,33 @@ impl Environment {
         self.catalog.segment_matches[segment][neighbor_segment]
     }
 
-    /// An empty result means exhaustion; dummy padding is never a candidate.
+    /// Legal placements covering the next empty cell; an empty result means exhaustion.
     pub fn list_candidates(&mut self) -> Vec<Action> {
-        for y in 0..BOARD_SIZE {
-            for x in 0..BOARD_SIZE {
-                let i = (y * BOARD_SIZE + x) as usize;
-                if self.cells[i] != CELL_EMPTY {
-                    continue;
-                }
-                let mut candidates = Vec::new();
-                for room_index in 0..self.catalog.rooms.len() {
-                    if self.can_place(room_index, x, y) {
-                        candidates.push(Action::Place {
-                            room_index: room_index as i8,
-                            x,
-                            y,
-                        });
+        for &i in &self.cell_order {
+            if self.cells[i] != CELL_EMPTY {
+                continue;
+            }
+            let x = (i % BOARD_SIZE as usize) as i8;
+            let y = (i / BOARD_SIZE as usize) as i8;
+            let mut candidates = Vec::new();
+            for room_index in 0..self.catalog.rooms.len() {
+                let [width, height] = self.catalog.rooms[room_index].size;
+                for anchor_y in (y - height + 1).max(0)..=y {
+                    for anchor_x in (x - width + 1).max(0)..=x {
+                        if self.can_place(room_index, anchor_x, anchor_y) {
+                            candidates.push(Action::Place {
+                                room_index: room_index as i8,
+                                x: anchor_x,
+                                y: anchor_y,
+                            });
+                        }
                     }
                 }
-                if candidates.is_empty() {
-                    self.cells[i] = CELL_FAILED;
-                } else {
-                    return candidates;
-                }
+            }
+            if candidates.is_empty() {
+                self.cells[i] = CELL_FAILED;
+            } else {
+                return candidates;
             }
         }
         Vec::new()
@@ -287,7 +296,7 @@ impl Environment {
         if actions.len() > EPISODE_LENGTH {
             return Err("episode exceeds 40 action slots");
         }
-        let mut environment = Self::new(catalog);
+        let mut environment = Self::new(catalog, std::array::from_fn(|i| i));
         for &action in actions {
             environment.apply_action(action);
         }
