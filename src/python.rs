@@ -141,8 +141,30 @@ impl PyEnvironmentGroup {
             .environments
             .first()
             .map_or(0, |e| e.get_positions().len());
-        for environment in &mut self.environments {
-            for (action, features) in environment.extract_candidate_features() {
+        let candidates = py.detach(|| {
+            let workers = std::thread::available_parallelism().map_or(1, |n| n.get());
+            let chunk_size = self.environments.len().div_ceil(workers).max(1);
+            std::thread::scope(|scope| {
+                let handles: Vec<_> = self
+                    .environments
+                    .chunks_mut(chunk_size)
+                    .map(|chunk| {
+                        scope.spawn(|| {
+                            chunk
+                                .iter_mut()
+                                .map(Environment::extract_candidate_features)
+                                .collect::<Vec<_>>()
+                        })
+                    })
+                    .collect();
+                handles
+                    .into_iter()
+                    .flat_map(|handle| handle.join().unwrap())
+                    .collect::<Vec<_>>()
+            })
+        });
+        for candidates in candidates {
+            for (action, features) in candidates {
                 if let Action::Place { room_index, x, y } = action {
                     actions.push((room_index, x, y));
                     room_cells.extend(features.room_cells);
