@@ -129,9 +129,10 @@ class TrainingSession:
                     with safe_open(path, framework="pt", device="cpu") as file:
                         if file.metadata()["catalog_hash"] != self.catalog_hash:
                             raise ValueError(f"Experience catalog does not match: {path}")
-                        self.unique_maps.update(collect_unique_maps(
+                        unique_maps, _ = collect_unique_maps(
                             file.get_tensor("actions"), file.get_tensor("outcomes"),
-                        ))
+                        )
+                        self.unique_maps.update(unique_maps)
         for name in ("experience", "checkpoints", "metrics"):
             (self.run_dir / name).mkdir(exist_ok=True)
         (self.run_dir / "config.json").write_text(json.dumps(config, indent=2) + "\n")
@@ -256,10 +257,21 @@ class TrainingSession:
             })
             unique_log = ""
             if self.log_unique_maps or self.unique_maps is not None:
-                unique_maps = collect_unique_maps(data["actions"], data["outcomes"])
+                unique_maps, counts = collect_unique_maps(data["actions"], data["outcomes"])
                 if self.log_unique_maps:
                     metrics["unique_maps"] = len(unique_maps)
                     unique_log += f" unique={len(unique_maps)}"
+                    valid_count = counts.sum().item()
+                    collision_probability = None
+                    if valid_count >= 2:
+                        collision_probability = (counts * (counts - 1)).sum().item() / (
+                            valid_count * (valid_count - 1)
+                        )
+                    metrics["map_collision_probability"] = collision_probability
+                    if collision_probability is None:
+                        unique_log += " collision=n/a"
+                    else:
+                        unique_log += f" collision={collision_probability:.6g}"
                 if self.unique_maps is not None:
                     self.unique_maps.update(unique_maps)
                     metrics["cumulative_unique_maps"] = len(self.unique_maps)
@@ -285,7 +297,10 @@ def main():
     parser = argparse.ArgumentParser(description="Train the overworld outcome predictor")
     parser.add_argument("config", type=Path)
     parser.add_argument("--resume", type=Path, help="Resume a safetensors checkpoint in the same run")
-    parser.add_argument("--log-unique-maps", action="store_true", help="Log unique valid maps in each round")
+    parser.add_argument(
+        "--log-unique-maps", action="store_true",
+        help="Log unique valid maps and estimated collision probability in each round",
+    )
     parser.add_argument(
         "--log-cumulative-unique-maps", action="store_true",
         help="Log unique valid maps since the run began; resume saved tracking or reconstruct from experience",

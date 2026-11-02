@@ -16,7 +16,8 @@ def collect_unique_maps(actions, outcomes):
         1, valid_actions[:, :, 0],
         (valid_actions[:, :, 2] * BOARD_SIZE + valid_actions[:, :, 1]).to(torch.uint8),
     )
-    return {bytes(row) for row in positions.unique(dim=0).tolist()}
+    unique_positions, counts = positions.unique(dim=0, return_counts=True)
+    return {bytes(row) for row in unique_positions.tolist()}, counts
 
 
 @dataclass
