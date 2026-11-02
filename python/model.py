@@ -19,8 +19,8 @@ class OutcomeModel(nn.Module):
             raise ValueError("Embedding dimensions, hidden layer count, and width must be positive")
         room_count = len(catalog.room_ids)
         cell_count = BOARD_SIZE * BOARD_SIZE
-        self.room_embedding = nn.Embedding(catalog.room_cell_count, room_embedding_dim)
-        self.position_embedding = nn.Embedding(cell_count, position_embedding_dim)
+        self.room_embedding = nn.Embedding(catalog.room_cell_count + 1, room_embedding_dim)
+        self.position_embedding = nn.Embedding(cell_count + 1, position_embedding_dim)
         input_width = room_count * position_embedding_dim + cell_count * room_embedding_dim
         layers = []
         for _ in range(hidden_layers):
@@ -32,9 +32,7 @@ class OutcomeModel(nn.Module):
         self.mlp = nn.Sequential(*layers)
 
     def forward(self, room_positions: torch.Tensor, room_cells: torch.Tensor) -> torch.Tensor:
-        positions = self.position_embedding(room_positions.clamp_min(0))
-        positions = positions.masked_fill((room_positions < 0).unsqueeze(-1), 0)
-        cells = self.room_embedding(room_cells.clamp_min(0))
-        cells = cells.masked_fill((room_cells < 0).unsqueeze(-1), 0)
+        positions = self.position_embedding(room_positions + 1)
+        cells = self.room_embedding((room_cells + 1).clamp_min(0))
         inputs = torch.cat((positions.flatten(-2), cells.flatten(-2)), dim=-1)
         return self.mlp(inputs)
