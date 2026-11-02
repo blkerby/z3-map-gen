@@ -228,6 +228,7 @@ class TrainingSession:
             self.catalog_hash, self.catalog.room_ids,
             self.unique_maps,
         )
+        logging.info("Saved checkpoint: %s", path)
 
     def run(self):
         last_saved_round = None
