@@ -272,7 +272,7 @@ class TrainingSession:
                     if collision_probability is None:
                         unique_log += " collision=n/a"
                     else:
-                        unique_log += f" collision={collision_probability:.6g}"
+                        unique_log += f" collision={collision_probability:.5f}"
                 if self.unique_maps is not None:
                     self.unique_maps.update(unique_maps)
                     metrics["cumulative_unique_maps"] = len(self.unique_maps)

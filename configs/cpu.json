@@ -19,12 +19,12 @@
   "generation": {
     "environment_count": 1024,
     "batches_per_round": 1,
-    "temperature": 0.1,
+    "temperature": 0.2,
     "log_success_floor": -50.0
   },
   "train": {
     "batch_size": 256,
-    "batches_per_round": 10,
+    "batches_per_round": 20,
     "experience_rounds": 10
   }
 }

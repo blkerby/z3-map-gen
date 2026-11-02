@@ -2,8 +2,9 @@
   "room_data": "data/rooms.json",
   "device": "cuda:0",
   "seed": 0,
-  "rounds": 1000000,
+  "rounds": 10000000,
   "checkpoint_period": 100,
+  "knot_episodes": [0, 200000],
   "model": {
     "room_embedding_dim": 16,
     "position_embedding_dim": 8,
@@ -11,19 +12,19 @@
     "hidden_width": 256
   },
   "optimizer": {
-    "learning_rate": 0.0003,
+    "learning_rate": {"log": [0.0005, 0.00005]},
     "beta1": 0.9,
     "beta2": 0.999
   },
   "generation": {
-    "environment_count": 4096,
+    "environment_count": 8192,
     "batches_per_round": 1,
-    "temperature": 1.0,
+    "temperature": 0.1,
     "log_success_floor": -50.0
   },
   "train": {
-    "batch_size": 512,
-    "batches_per_round": 100,
+    "batch_size": 256,
+    "batches_per_round": 10,
     "experience_rounds": 10
   }
 }
