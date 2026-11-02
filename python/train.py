@@ -173,7 +173,7 @@ class TrainingSession:
             action_batches.append(torch.tensor(steps, dtype=torch.long).permute(1, 0, 2))
             features = environments.extract_features()
             outcomes = torch.cat(
-                (torch.tensor(features.room_positions) >= 0, torch.tensor(features.room_cells) >= 0),
+                (features.room_positions >= 0, features.room_cells >= 0),
                 dim=1,
             )
             outcome_batches.append(outcomes)
@@ -213,8 +213,8 @@ class TrainingSession:
                 episodes.append(actions)
                 labels.append(outcomes)
             features = EnvironmentGroup.replay(self.catalog, episodes).extract_features()
-            room_positions = torch.tensor(features.room_positions, dtype=torch.long, device=self.device)
-            room_cells = torch.tensor(features.room_cells, dtype=torch.long, device=self.device)
+            room_positions = features.room_positions.to(self.device)
+            room_cells = features.room_cells.to(self.device)
             targets = torch.stack(labels).to(device=self.device, dtype=torch.float32)
             unresolved = torch.cat((room_positions < 0, room_cells < 0), dim=1)
             logits = self.model(room_positions, room_cells)

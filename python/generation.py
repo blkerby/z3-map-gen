@@ -19,8 +19,8 @@ def score_candidates(
     if candidates.environment_offsets[-1] == 0:
         return torch.empty(0, device=device)
     features = candidates.features
-    room_positions = torch.tensor(features.room_positions, dtype=torch.long).to(device)
-    room_cells = torch.tensor(features.room_cells, dtype=torch.long).to(device)
+    room_positions = features.room_positions.to(device)
+    room_cells = features.room_cells.to(device)
     n = room_positions.shape[0]
     failed_cells = room_cells == CELL_FAILED
     failed_position = torch.zeros([n, NUM_ROOMS], dtype=torch.bool, device=device)

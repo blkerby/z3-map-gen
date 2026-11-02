@@ -1,7 +1,7 @@
 use crate::{Action, BOARD_SIZE, Catalog, EPISODE_LENGTH, Environment};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::PyList;
+use pyo3::types::{PyByteArray, PyDict, PyList};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -45,7 +45,7 @@ impl PyCatalog {
 struct PyCandidateFeatures {
     actions: Vec<(i8, i8, i8)>,
     environment_offsets: Vec<usize>,
-    features: PyFeatures,
+    features: Py<PyFeatures>,
 }
 
 #[pyclass(
@@ -55,10 +55,32 @@ struct PyCandidateFeatures {
     skip_from_py_object,
     module = "z3_map_gen"
 )]
-#[derive(Clone)]
 struct PyFeatures {
-    room_cells: Vec<Vec<i8>>,
-    room_positions: Vec<Vec<i8>>,
+    room_cells: Py<PyAny>,
+    room_positions: Py<PyAny>,
+}
+
+fn feature_tensor(py: Python<'_>, values: &[i8], shape: (usize, usize)) -> PyResult<Py<PyAny>> {
+    let torch = py.import("torch")?;
+    let kwargs = PyDict::new(py);
+    kwargs.set_item("dtype", torch.getattr("long")?)?;
+    if values.is_empty() {
+        kwargs.set_item("device", "cpu")?;
+        return Ok(torch
+            .call_method("empty", (shape,), Some(&kwargs))?
+            .unbind());
+    }
+    // The tensor retains this writable Python buffer after Rust returns.
+    let buffer = PyByteArray::new_with(py, values.len() * size_of::<i64>(), |bytes| {
+        for (chunk, &value) in bytes.chunks_exact_mut(size_of::<i64>()).zip(values) {
+            chunk.copy_from_slice(&i64::from(value).to_ne_bytes());
+        }
+        Ok(())
+    })?;
+    Ok(torch
+        .call_method("frombuffer", (buffer,), Some(&kwargs))?
+        .call_method1("reshape", (shape,))?
+        .unbind())
 }
 
 #[pyclass(name = "EnvironmentGroup", module = "z3_map_gen")]
@@ -87,43 +109,64 @@ impl PyEnvironmentGroup {
         Ok(Self { environments })
     }
 
-    fn extract_features(&self) -> PyFeatures {
+    fn extract_features(&self, py: Python<'_>) -> PyResult<PyFeatures> {
         let mut room_cells = Vec::new();
         let mut room_positions = Vec::new();
+        let room_count = self
+            .environments
+            .first()
+            .map_or(0, |e| e.get_positions().len());
         for environment in &self.environments {
             let features = environment.extract_features();
-            room_cells.push(features.room_cells);
-            room_positions.push(features.room_positions);
+            room_cells.extend(features.room_cells);
+            room_positions.extend(features.room_positions);
         }
-        PyFeatures {
-            room_cells,
-            room_positions,
-        }
+        let rows = self.environments.len();
+        Ok(PyFeatures {
+            room_cells: feature_tensor(
+                py,
+                &room_cells,
+                (rows, (BOARD_SIZE * BOARD_SIZE) as usize),
+            )?,
+            room_positions: feature_tensor(py, &room_positions, (rows, room_count))?,
+        })
     }
 
-    fn extract_candidate_features(&mut self) -> PyCandidateFeatures {
+    fn extract_candidate_features(&mut self, py: Python<'_>) -> PyResult<PyCandidateFeatures> {
         let mut actions = Vec::new();
         let mut environment_offsets = vec![0];
         let mut room_cells = Vec::new();
         let mut room_positions = Vec::new();
+        let room_count = self
+            .environments
+            .first()
+            .map_or(0, |e| e.get_positions().len());
         for environment in &mut self.environments {
             for (action, features) in environment.extract_candidate_features() {
                 if let Action::Place { room_index, x, y } = action {
                     actions.push((room_index, x, y));
-                    room_cells.push(features.room_cells);
-                    room_positions.push(features.room_positions);
+                    room_cells.extend(features.room_cells);
+                    room_positions.extend(features.room_positions);
                 }
             }
             environment_offsets.push(actions.len());
         }
-        PyCandidateFeatures {
+        let rows = actions.len();
+        Ok(PyCandidateFeatures {
             actions,
             environment_offsets,
-            features: PyFeatures {
-                room_cells,
-                room_positions,
-            },
-        }
+            features: Py::new(
+                py,
+                PyFeatures {
+                    room_cells: feature_tensor(
+                        py,
+                        &room_cells,
+                        (rows, (BOARD_SIZE * BOARD_SIZE) as usize),
+                    )?,
+                    room_positions: feature_tensor(py, &room_positions, (rows, room_count))?,
+                },
+            )?,
+        })
     }
 
     fn apply_actions(&mut self, actions: Vec<Option<(i8, i8, i8)>>) -> PyResult<()> {
