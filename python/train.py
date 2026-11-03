@@ -16,7 +16,7 @@ from safetensors import safe_open
 from torch.nn import functional as F
 
 from checkpoint import load_checkpoint, save_checkpoint, save_tensors
-from experience import ExperienceRound, collect_unique_maps
+from experience import ExperienceRound, collect_unique_maps, placement_balance
 from generation import sample_actions
 from model import OutcomeModel
 from z3_map_gen import EPISODE_LENGTH, Catalog, EnvironmentGroup
@@ -264,6 +264,7 @@ class TrainingSession:
                 "mean_unoccupied_cells": (1.0 - outcomes[:, room_count:]).sum(dim=1).mean().item(),
                 "room_placement_frequency": outcomes[:, :room_count].mean(dim=0).tolist(),
                 "cell_fill_frequency": outcomes[:, room_count:].mean(dim=0).tolist(),
+                "placement_balance": placement_balance(data["actions"], self.catalog.room_sizes),
             })
             unique_log = ""
             if self.log_unique_maps or self.unique_maps is not None:
@@ -289,10 +290,10 @@ class TrainingSession:
             (self.run_dir / "metrics" / f"round_{number}.json").write_text(json.dumps(metrics) + "\n")
             self.completed_round = number
             logging.info(
-                "Round %s: complete=%.3f rooms=%.2f cells=%.2f loss=%.4f lr=%.6g%s", number,
+                "Round %s: complete=%.3f rooms=%.2f cells=%.2f loss=%.4f lr=%.6g balance=%.5f%s", number,
                 metrics["complete_map_frequency"], metrics["mean_rooms_unplaced"],
                 metrics["mean_unoccupied_cells"], metrics["loss_per_prefix"], metrics["learning_rate"],
-                unique_log,
+                metrics["placement_balance"], unique_log,
             )
             if number % self.config["checkpoint_period"] == 0:
                 self.save_checkpoint()

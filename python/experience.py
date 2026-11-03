@@ -8,6 +8,21 @@ from safetensors import safe_open
 from z3_map_gen import BOARD_SIZE
 
 
+def placement_balance(actions, room_sizes):
+    placements = actions[actions[:, :, 0] >= 0]
+    indices = placements[:, 0] * BOARD_SIZE**2 + placements[:, 2] * BOARD_SIZE + placements[:, 1]
+    counts = torch.bincount(indices, minlength=len(room_sizes) * BOARD_SIZE**2).reshape(
+        len(room_sizes), BOARD_SIZE**2,
+    )
+    totals = counts.sum(dim=1)
+    position_counts = torch.tensor([
+        (BOARD_SIZE - width + 1) * (BOARD_SIZE - height + 1) for width, height in room_sizes
+    ], dtype=torch.float64)
+    # Pool observed collisions relative to the geometry-only uniform expectation.
+    expected = (totals * (totals - 1) / position_counts).sum().item()
+    return (counts * (counts - 1)).sum().item() / expected if expected else float("nan")
+
+
 def collect_unique_maps(actions, outcomes):
     valid_actions = actions[outcomes.all(dim=1)]
     # Room-ordered anchors identify layouts independently of placement order.
