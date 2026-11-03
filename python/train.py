@@ -275,7 +275,7 @@ class TrainingSession:
                 unique_maps, counts = collect_unique_maps(data["actions"], data["outcomes"])
                 if self.log_unique_maps:
                     metrics["unique_maps"] = len(unique_maps)
-                    unique_log += f" unique={len(unique_maps)}"
+                    unique_log += f" uniq={len(unique_maps)}"
                     valid_count = counts.sum().item()
                     collision_probability = None
                     if valid_count >= 2:
@@ -290,12 +290,12 @@ class TrainingSession:
                 if self.unique_maps is not None:
                     self.unique_maps.update(unique_maps)
                     metrics["cumulative_unique_maps"] = len(self.unique_maps)
-                    unique_log += f" cumulative_unique={len(self.unique_maps)}"
+                    unique_log += f" cumul_uniq={len(self.unique_maps)}"
             (self.run_dir / "metrics" / f"round_{number}.json").write_text(json.dumps(metrics) + "\n")
             self.completed_round = number
             logging.info(
                 "Round %s: complete=%.3f rooms=%.2f cells=%.2f loss=%.4f lr=%.6g "
-                "bal=%.5f,%.5f edge=%.5f,%.5f%s",
+                "bal=%.2f (%.2f) edge=%.2f (%.2f)%s",
                 number,
                 metrics["complete_map_frequency"], metrics["mean_rooms_unplaced"],
                 metrics["mean_unoccupied_cells"], metrics["loss_per_prefix"], metrics["learning_rate"],
