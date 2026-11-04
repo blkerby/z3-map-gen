@@ -2,7 +2,7 @@ import torch
 from torch.nn import functional as F
 
 from model import OutcomeModel
-from z3_map_gen import CandidateFeatures, EnvironmentGroup
+from z3_map_gen import BOARD_SIZE, CandidateFeatures, EnvironmentGroup
 
 
 CELL_FAILED = -1
@@ -45,6 +45,7 @@ def sample_actions(
     *,
     temperature: float,
     log_success_floor: float,
+    placement_prices: torch.Tensor,
 ) -> list[tuple[int, int, int] | None]:
     """Sample once per environment; temperature must be positive and finite."""
     candidates = environments.extract_candidate_features()
@@ -54,6 +55,8 @@ def sample_actions(
     if not actions:
         return [None] * environment_count
     scores = score_candidates(model, candidates, log_success_floor)
+    placements = torch.tensor(actions, device=scores.device)
+    scores -= placement_prices[placements[:, 0], placements[:, 2] * BOARD_SIZE + placements[:, 1]]
     counts = [end - start for start, end in zip(offsets[:-1], offsets[1:])]
     device = scores.device
     counts_tensor = torch.tensor(counts, device=device)

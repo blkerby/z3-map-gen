@@ -1,0 +1,1457 @@
+{
+  "rooms": [
+    {
+      "id": 1,
+      "size": [
+        2,
+        2
+      ],
+      "edges": {
+        "north": [
+          [
+            "closed",
+            "small-2"
+          ],
+          [
+            "closed",
+            "dual-small",
+            "small-1",
+            "small-2"
+          ]
+        ],
+        "south": [
+          [
+            "closed",
+            "dual-small",
+            "small-1",
+            "small-2"
+          ],
+          [
+            "closed",
+            "dual-small",
+            "small-1",
+            "small-2"
+          ]
+        ],
+        "east": [
+          [
+            "closed",
+            "dual-small",
+            "small-1",
+            "small-2"
+          ],
+          [
+            "closed",
+            "small-2"
+          ]
+        ],
+        "west": [
+          [
+            "closed",
+            "small-2"
+          ],
+          [
+            "closed",
+            "dual-small",
+            "small-1",
+            "small-2"
+          ]
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "size": [
+        1,
+        1
+      ],
+      "edges": {
+        "north": [
+          [
+            "closed",
+            "small-1"
+          ]
+        ],
+        "south": [
+          [
+            "small-1",
+            "wide"
+          ]
+        ],
+        "east": [
+          [
+            "closed",
+            "small-1"
+          ]
+        ],
+        "west": [
+          [
+            "closed",
+            "small-1"
+          ]
+        ]
+      }
+    },
+    {
+      "id": 3,
+      "size": [
+        2,
+        2
+      ],
+      "edges": {
+        "north": [
+          [
+            "closed",
+            "small-1"
+          ],
+          [
+            "closed"
+          ]
+        ],
+        "south": [
+          [
+            "closed",
+            "small-2"
+          ],
+          [
+            "closed",
+            "small-1"
+          ]
+        ],
+        "east": [
+          [
+            "closed",
+            "small-1"
+          ],
+          [
+            "closed",
+            "small-2"
+          ]
+        ],
+        "west": [
+          [
+            "closed",
+            "small-1"
+          ],
+          [
+            "closed"
+          ]
+        ]
+      }
+    },
+    {
+      "id": 4,
+      "size": [
+        2,
+        2
+      ],
+      "edges": {
+        "north": [
+          [
+            "closed"
+          ],
+          [
+            "closed",
+            "small-2"
+          ]
+        ],
+        "south": [
+          [
+            "closed"
+          ],
+          [
+            "closed",
+            "dual-small",
+            "small-1",
+            "small-2"
+          ]
+        ],
+        "east": [
+          [
+            "closed",
+            "small-1"
+          ],
+          [
+            "closed"
+          ]
+        ],
+        "west": [
+          [
+            "closed",
+            "small-1"
+          ],
+          [
+            "closed",
+            "small-2"
+          ]
+        ]
+      }
+    },
+    {
+      "id": 5,
+      "size": [
+        1,
+        1
+      ],
+      "edges": {
+        "north": [
+          [
+            "closed",
+            "small-1"
+          ]
+        ],
+        "south": [
+          [
+            "closed",
+            "small-2"
+          ]
+        ],
+        "east": [
+          [
+            "closed"
+          ]
+        ],
+        "west": [
+          [
+            "closed",
+            "small-1"
+          ]
+        ]
+      }
+    },
+    {
+      "id": 6,
+      "size": [
+        1,
+        1
+      ],
+      "edges": {
+        "north": [
+          [
+            "small-1",
+            "wide"
+          ]
+        ],
+        "south": [
+          [
+            "wide"
+          ]
+        ],
+        "east": [
+          [
+            "closed",
+            "small-2"
+          ]
+        ],
+        "west": [
+          [
+            "closed",
+            "small-1"
+          ]
+        ]
+      }
+    },
+    {
+      "id": 7,
+      "size": [
+        1,
+        1
+      ],
+      "edges": {
+        "north": [
+          [
+            "closed"
+          ]
+        ],
+        "south": [
+          [
+            "small-2"
+          ]
+        ],
+        "east": [
+          [
+            "closed",
+            "small-2"
+          ]
+        ],
+        "west": [
+          [
+            "closed"
+          ]
+        ]
+      }
+    },
+    {
+      "id": 8,
+      "size": [
+        1,
+        1
+      ],
+      "edges": {
+        "north": [
+          [
+            "dual-small",
+            "small-2"
+          ]
+        ],
+        "south": [
+          [
+            "dual-small"
+          ]
+        ],
+        "east": [
+          [
+            "closed",
+            "small-2"
+          ]
+        ],
+        "west": [
+          [
+            "closed",
+            "small-1"
+          ]
+        ]
+      }
+    },
+    {
+      "id": 9,
+      "size": [
+        1,
+        1
+      ],
+      "edges": {
+        "north": [
+          [
+            "closed",
+            "small-2"
+          ]
+        ],
+        "south": [
+          [
+            "small-2",
+            "wide"
+          ]
+        ],
+        "east": [
+          [
+            "closed",
+            "dual-small",
+            "small-1",
+            "small-2"
+          ]
+        ],
+        "west": [
+          [
+            "closed"
+          ]
+        ]
+      }
+    },
+    {
+      "id": 10,
+      "size": [
+        1,
+        1
+      ],
+      "edges": {
+        "north": [
+          [
+            "wide"
+          ]
+        ],
+        "south": [
+          [
+            "dual-small",
+            "wide"
+          ]
+        ],
+        "east": [
+          [
+            "closed",
+            "dual-small",
+            "small-1",
+            "small-2"
+          ]
+        ],
+        "west": [
+          [
+            "closed",
+            "dual-small",
+            "small-1",
+            "small-2"
+          ]
+        ]
+      }
+    },
+    {
+      "id": 11,
+      "size": [
+        1,
+        1
+      ],
+      "edges": {
+        "north": [
+          [
+            "closed",
+            "small-1"
+          ]
+        ],
+        "south": [
+          [
+            "closed",
+            "small-1",
+            "small-2",
+            "wide"
+          ]
+        ],
+        "east": [
+          [
+            "small-2",
+            "wide"
+          ]
+        ],
+        "west": [
+          [
+            "dual-small",
+            "lake",
+            "small-2",
+            "wide"
+          ]
+        ]
+      }
+    },
+    {
+      "id": 12,
+      "size": [
+        1,
+        1
+      ],
+      "edges": {
+        "north": [
+          [
+            "closed",
+            "small-1"
+          ]
+        ],
+        "south": [
+          [
+            "closed",
+            "small-1",
+            "small-2",
+            "wide"
+          ]
+        ],
+        "east": [
+          [
+            "small-2",
+            "wide"
+          ]
+        ],
+        "west": [
+          [
+            "small-2",
+            "wide"
+          ]
+        ]
+      }
+    },
+    {
+      "id": 13,
+      "size": [
+        1,
+        1
+      ],
+      "edges": {
+        "north": [
+          [
+            "closed"
+          ]
+        ],
+        "south": [
+          [
+            "land-water-land"
+          ]
+        ],
+        "east": [
+          [
+            "horizonal-water-land"
+          ]
+        ],
+        "west": [
+          [
+            "lake",
+            "wide"
+          ]
+        ]
+      }
+    },
+    {
+      "id": 14,
+      "size": [
+        1,
+        1
+      ],
+      "edges": {
+        "north": [
+          [
+            "closed"
+          ]
+        ],
+        "south": [
+          [
+            "closed",
+            "small-2"
+          ]
+        ],
+        "east": [
+          [
+            "horizonal-water-land"
+          ]
+        ],
+        "west": [
+          [
+            "horizonal-water-land"
+          ]
+        ]
+      }
+    },
+    {
+      "id": 15,
+      "size": [
+        1,
+        1
+      ],
+      "edges": {
+        "north": [
+          [
+            "closed",
+            "small-2"
+          ]
+        ],
+        "south": [
+          [
+            "closed"
+          ]
+        ],
+        "east": [
+          [
+            "closed",
+            "small-1"
+          ]
+        ],
+        "west": [
+          [
+            "horizonal-water-land"
+          ]
+        ]
+      }
+    },
+    {
+      "id": 16,
+      "size": [
+        2,
+        2
+      ],
+      "edges": {
+        "north": [
+          [
+            "closed",
+            "dual-small",
+            "small-1",
+            "small-2"
+          ],
+          [
+            "small-2",
+            "wide"
+          ]
+        ],
+        "south": [
+          [
+            "closed",
+            "small-2"
+          ],
+          [
+            "small-2",
+            "wide"
+          ]
+        ],
+        "east": [
+          [
+            "closed",
+            "small-1"
+          ],
+          [
+            "closed",
+            "small-2"
+          ]
+        ],
+        "west": [
+          [
+            "closed",
+            "small-1",
+            "small-2"
+          ],
+          [
+            "closed",
+            "dual-small",
+            "small-1",
+            "small-2"
+          ]
+        ]
+      }
+    },
+    {
+      "id": 17,
+      "size": [
+        1,
+        1
+      ],
+      "edges": {
+        "north": [
+          [
+            "dual-small",
+            "wide"
+          ]
+        ],
+        "south": [
+          [
+            "closed",
+            "small-2"
+          ]
+        ],
+        "east": [
+          [
+            "light-and-mirror",
+            "light-only"
+          ]
+        ],
+        "west": [
+          [
+            "closed",
+            "small-1"
+          ]
+        ]
+      }
+    },
+    {
+      "id": 18,
+      "size": [
+        2,
+        2
+      ],
+      "edges": {
+        "north": [
+          [
+            "closed"
+          ],
+          [
+            "closed"
+          ]
+        ],
+        "south": [
+          [
+            "small-1",
+            "wide"
+          ],
+          [
+            "small-2",
+            "wide"
+          ]
+        ],
+        "east": [
+          [
+            "closed"
+          ],
+          [
+            "small-1"
+          ]
+        ],
+        "west": [
+          [
+            "light-and-mirror",
+            "light-only"
+          ],
+          [
+            "closed",
+            "dual-small",
+            "small-1",
+            "small-2"
+          ]
+        ]
+      }
+    },
+    {
+      "id": 19,
+      "size": [
+        1,
+        1
+      ],
+      "edges": {
+        "north": [
+          [
+            "land-water-land"
+          ]
+        ],
+        "south": [
+          [
+            "small-1",
+            "wide"
+          ]
+        ],
+        "east": [
+          [
+            "closed",
+            "small-2"
+          ]
+        ],
+        "west": [
+          [
+            "closed",
+            "small-1"
+          ]
+        ]
+      }
+    },
+    {
+      "id": 20,
+      "size": [
+        2,
+        2
+      ],
+      "edges": {
+        "north": [
+          [
+            "closed",
+            "small-1",
+            "small-2",
+            "wide"
+          ],
+          [
+            "closed"
+          ]
+        ],
+        "south": [
+          [
+            "closed",
+            "small-1",
+            "small-2",
+            "wide"
+          ],
+          [
+            "closed",
+            "small-2"
+          ]
+        ],
+        "east": [
+          [
+            "closed"
+          ],
+          [
+            "closed"
+          ]
+        ],
+        "west": [
+          [
+            "closed",
+            "lake",
+            "small-1",
+            "small-2",
+            "wide"
+          ],
+          [
+            "closed",
+            "small-2"
+          ]
+        ]
+      }
+    },
+    {
+      "id": 21,
+      "size": [
+        1,
+        1
+      ],
+      "edges": {
+        "north": [
+          [
+            "closed"
+          ]
+        ],
+        "south": [
+          [
+            "closed",
+            "small-2"
+          ]
+        ],
+        "east": [
+          [
+            "closed",
+            "small-2"
+          ]
+        ],
+        "west": [
+          [
+            "closed",
+            "small-2"
+          ]
+        ]
+      }
+    },
+    {
+      "id": 22,
+      "size": [
+        1,
+        1
+      ],
+      "edges": {
+        "north": [
+          [
+            "small-1",
+            "wide"
+          ]
+        ],
+        "south": [
+          [
+            "wide"
+          ]
+        ],
+        "east": [
+          [
+            "closed",
+            "small-2"
+          ]
+        ],
+        "west": [
+          [
+            "closed",
+            "small-1",
+            "small-2"
+          ]
+        ]
+      }
+    },
+    {
+      "id": 23,
+      "size": [
+        1,
+        1
+      ],
+      "edges": {
+        "north": [
+          [
+            "closed"
+          ]
+        ],
+        "south": [
+          [
+            "closed",
+            "small-1",
+            "small-2",
+            "wide"
+          ]
+        ],
+        "east": [
+          [
+            "split-house"
+          ]
+        ],
+        "west": [
+          [
+            "closed",
+            "small-2"
+          ]
+        ]
+      }
+    },
+    {
+      "id": 24,
+      "size": [
+        1,
+        1
+      ],
+      "edges": {
+        "north": [
+          [
+            "small-2",
+            "wide"
+          ]
+        ],
+        "south": [
+          [
+            "closed",
+            "small-1",
+            "small-2"
+          ]
+        ],
+        "east": [
+          [
+            "closed",
+            "dual-small",
+            "small-1",
+            "small-2"
+          ]
+        ],
+        "west": [
+          [
+            "split-house"
+          ]
+        ]
+      }
+    },
+    {
+      "id": 25,
+      "size": [
+        1,
+        1
+      ],
+      "edges": {
+        "north": [
+          [
+            "closed"
+          ]
+        ],
+        "south": [
+          [
+            "dual-small"
+          ]
+        ],
+        "east": [
+          [
+            "closed"
+          ]
+        ],
+        "west": [
+          [
+            "small-2"
+          ]
+        ]
+      }
+    },
+    {
+      "id": 26,
+      "size": [
+        1,
+        1
+      ],
+      "edges": {
+        "north": [
+          [
+            "closed",
+            "small-1"
+          ]
+        ],
+        "south": [
+          [
+            "closed",
+            "small-1",
+            "wide"
+          ]
+        ],
+        "east": [
+          [
+            "dual-small",
+            "wide"
+          ]
+        ],
+        "west": [
+          [
+            "closed",
+            "small-1",
+            "small-2"
+          ]
+        ]
+      }
+    },
+    {
+      "id": 27,
+      "size": [
+        1,
+        1
+      ],
+      "edges": {
+        "north": [
+          [
+            "small-2",
+            "wide"
+          ]
+        ],
+        "south": [
+          [
+            "closed",
+            "small-1",
+            "small-2",
+            "wide"
+          ]
+        ],
+        "east": [
+          [
+            "closed",
+            "small-2"
+          ]
+        ],
+        "west": [
+          [
+            "dual-small",
+            "wide"
+          ]
+        ]
+      }
+    },
+    {
+      "id": 28,
+      "size": [
+        1,
+        1
+      ],
+      "edges": {
+        "north": [
+          [
+            "wide"
+          ]
+        ],
+        "south": [
+          [
+            "small-1",
+            "wide"
+          ]
+        ],
+        "east": [
+          [
+            "horizontal-land-water",
+            "small-1"
+          ]
+        ],
+        "west": [
+          [
+            "closed",
+            "small-2"
+          ]
+        ]
+      }
+    },
+    {
+      "id": 29,
+      "size": [
+        1,
+        1
+      ],
+      "edges": {
+        "north": [
+          [
+            "small-1",
+            "wide"
+          ]
+        ],
+        "south": [
+          [
+            "vertical-water-land"
+          ]
+        ],
+        "east": [
+          [
+            "closed"
+          ]
+        ],
+        "west": [
+          [
+            "horizontal-land-water",
+            "small-1"
+          ]
+        ]
+      }
+    },
+    {
+      "id": 30,
+      "size": [
+        1,
+        1
+      ],
+      "edges": {
+        "north": [
+          [
+            "small-2"
+          ]
+        ],
+        "south": [
+          [
+            "closed",
+            "small-1"
+          ]
+        ],
+        "east": [
+          [
+            "closed",
+            "small-1",
+            "small-2"
+          ]
+        ],
+        "west": [
+          [
+            "closed",
+            "small-1"
+          ]
+        ]
+      }
+    },
+    {
+      "id": 31,
+      "size": [
+        2,
+        2
+      ],
+      "edges": {
+        "north": [
+          [
+            "closed",
+            "small-1"
+          ],
+          [
+            "closed",
+            "small-2"
+          ]
+        ],
+        "south": [
+          [
+            "closed",
+            "small-1"
+          ],
+          [
+            "closed",
+            "small-1",
+            "small-2",
+            "wide"
+          ]
+        ],
+        "east": [
+          [
+            "closed",
+            "small-2"
+          ],
+          [
+            "light-and-mirror"
+          ]
+        ],
+        "west": [
+          [
+            "closed",
+            "lake",
+            "small-1",
+            "small-2",
+            "wide"
+          ],
+          [
+            "closed",
+            "dual-small",
+            "small-1",
+            "small-2"
+          ]
+        ]
+      }
+    },
+    {
+      "id": 32,
+      "size": [
+        1,
+        1
+      ],
+      "edges": {
+        "north": [
+          [
+            "dual-small",
+            "small-1"
+          ]
+        ],
+        "south": [
+          [
+            "closed",
+            "small-2"
+          ]
+        ],
+        "east": [
+          [
+            "wide"
+          ]
+        ],
+        "west": [
+          [
+            "closed"
+          ]
+        ]
+      }
+    },
+    {
+      "id": 33,
+      "size": [
+        1,
+        1
+      ],
+      "edges": {
+        "north": [
+          [
+            "closed",
+            "small-1"
+          ]
+        ],
+        "south": [
+          [
+            "wide"
+          ]
+        ],
+        "east": [
+          [
+            "lake",
+            "wide"
+          ]
+        ],
+        "west": [
+          [
+            "small-1",
+            "wide"
+          ]
+        ]
+      }
+    },
+    {
+      "id": 34,
+      "size": [
+        1,
+        1
+      ],
+      "edges": {
+        "north": [
+          [
+            "small-1",
+            "wide"
+          ]
+        ],
+        "south": [
+          [
+            "wide"
+          ]
+        ],
+        "east": [
+          [
+            "closed",
+            "small-1"
+          ]
+        ],
+        "west": [
+          [
+            "lake",
+            "wide"
+          ]
+        ]
+      }
+    },
+    {
+      "id": 35,
+      "size": [
+        2,
+        2
+      ],
+      "edges": {
+        "north": [
+          [
+            "small-1",
+            "wide"
+          ],
+          [
+            "vertical-water-land"
+          ]
+        ],
+        "south": [
+          [
+            "closed",
+            "small-1"
+          ],
+          [
+            "closed",
+            "small-2"
+          ]
+        ],
+        "east": [
+          [
+            "closed",
+            "small-1"
+          ],
+          [
+            "horizonal-water-land"
+          ]
+        ],
+        "west": [
+          [
+            "closed",
+            "small-2"
+          ],
+          [
+            "lake",
+            "small-2",
+            "wide"
+          ]
+        ]
+      }
+    },
+    {
+      "id": 36,
+      "size": [
+        1,
+        1
+      ],
+      "edges": {
+        "north": [
+          [
+            "closed",
+            "small-2"
+          ]
+        ],
+        "south": [
+          [
+            "vertical-water-land"
+          ]
+        ],
+        "east": [
+          [
+            "closed"
+          ]
+        ],
+        "west": [
+          [
+            "closed",
+            "small-1"
+          ]
+        ]
+      }
+    },
+    {
+      "id": 37,
+      "size": [
+        1,
+        1
+      ],
+      "edges": {
+        "north": [
+          [
+            "closed",
+            "small-2"
+          ]
+        ],
+        "south": [
+          [
+            "closed",
+            "small-1"
+          ]
+        ],
+        "east": [
+          [
+            "dual-small",
+            "small-2"
+          ]
+        ],
+        "west": [
+          [
+            "light-and-mirror",
+            "light-only"
+          ]
+        ]
+      }
+    },
+    {
+      "id": 38,
+      "size": [
+        1,
+        1
+      ],
+      "edges": {
+        "north": [
+          [
+            "wide"
+          ]
+        ],
+        "south": [
+          [
+            "closed",
+            "small-1",
+            "small-2"
+          ]
+        ],
+        "east": [
+          [
+            "wide"
+          ]
+        ],
+        "west": [
+          [
+            "dual-small",
+            "lake",
+            "small-2",
+            "wide"
+          ]
+        ]
+      }
+    },
+    {
+      "id": 39,
+      "size": [
+        1,
+        1
+      ],
+      "edges": {
+        "north": [
+          [
+            "wide"
+          ]
+        ],
+        "south": [
+          [
+            "closed",
+            "small-2"
+          ]
+        ],
+        "east": [
+          [
+            "closed",
+            "small-2",
+            "wide"
+          ]
+        ],
+        "west": [
+          [
+            "wide"
+          ]
+        ]
+      }
+    },
+    {
+      "id": 40,
+      "size": [
+        1,
+        1
+      ],
+      "edges": {
+        "north": [
+          [
+            "vertical-water-land"
+          ]
+        ],
+        "south": [
+          [
+            "closed",
+            "small-1",
+            "small-2"
+          ]
+        ],
+        "east": [
+          [
+            "closed",
+            "small-1"
+          ]
+        ],
+        "west": [
+          [
+            "horizonal-water-land"
+          ]
+        ]
+      }
+    }
+  ]
+}

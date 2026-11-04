@@ -22,6 +22,10 @@
     "temperature": {"log": [0.2, 0.1]},
     "log_success_floor": -50.0
   },
+  "placement_controller": {
+    "gain": 0.005,
+    "leak": 0.05
+  },
   "train": {
     "batch_size": 256,
     "batches_per_round": 20,

@@ -19,6 +19,7 @@ from checkpoint import load_checkpoint, save_checkpoint, save_tensors
 from experience import ExperienceRound, collect_unique_maps, edge_pair_balance, placement_balance
 from generation import sample_actions
 from model import OutcomeModel
+from placement import PlacementController
 from z3_map_gen import EPISODE_LENGTH, Catalog, EnvironmentGroup
 
 
@@ -71,6 +72,11 @@ def load_config(path):
     floor = config["generation"]["log_success_floor"]
     if not math.isfinite(floor) or floor >= 0:
         raise ValueError("generation.log_success_floor must be finite and negative")
+    controller = config["placement_controller"]
+    if not math.isfinite(controller["gain"]) or controller["gain"] < 0:
+        raise ValueError("placement_controller.gain must be finite and nonnegative")
+    if not math.isfinite(controller["leak"]) or not 0 < controller["leak"] <= 1:
+        raise ValueError("placement_controller.leak must be in (0, 1]")
     config["room_data"] = str(Path(config["room_data"]).resolve())
     return config
 
@@ -105,6 +111,9 @@ class TrainingSession:
         self.catalog = Catalog(config["room_data"])
         self.catalog_hash = hashlib.sha256(Path(config["room_data"]).read_bytes()).hexdigest()
         self.device = torch.device(config["device"])
+        self.placement_controller = PlacementController(
+            self.catalog.room_sizes, self.device, **config["placement_controller"],
+        )
         random.seed(config["seed"])
         torch.manual_seed(config["seed"])
         self.model = OutcomeModel(self.catalog, **config["model"]).to(self.device)
@@ -125,6 +134,7 @@ class TrainingSession:
         else:
             self.completed_round, unique_maps = load_checkpoint(
                 resume, self.model, self.optimizer, config,
+                self.placement_controller.prices,
             )
             if unique_maps is not None:
                 self.unique_maps = unique_maps
@@ -168,6 +178,7 @@ class TrainingSession:
                     environments, self.model,
                     temperature=temperature,
                     log_success_floor=settings["log_success_floor"],
+                    placement_prices=self.placement_controller.prices,
                 )
                 environments.apply_actions(actions)
                 steps.append([action if action is not None else (-1, -1, -1) for action in actions])
@@ -236,11 +247,13 @@ class TrainingSession:
             path, self.model, self.optimizer, self.completed_round, self.config,
             self.catalog_hash, self.catalog.room_ids,
             self.unique_maps,
+            self.placement_controller.prices,
         )
         logging.info("Saved checkpoint: %s", path)
 
     def run(self):
         last_saved_round = None
+        torch.set_float32_matmul_precision('high')        
         for number in range(self.completed_round + 1, self.config["rounds"] + 1):
             if self.stop_requested:
                 break
@@ -255,6 +268,7 @@ class TrainingSession:
                 },
             )
             metrics = self.train_round(number)
+            metrics.update(self.placement_controller.update(data["actions"]))
             room_count = len(self.catalog.room_ids)
             outcomes = data["outcomes"].float()
             valid_actions = data["actions"][data["outcomes"].all(dim=1)]
@@ -295,12 +309,13 @@ class TrainingSession:
             self.completed_round = number
             logging.info(
                 "Round %s: complete=%.3f rooms=%.2f cells=%.2f loss=%.4f lr=%.6g "
-                "bal=%.2f (%.2f) edge=%.2f (%.2f)%s",
+                "bal=%.2f (%.2f) edge=%.2f (%.2f) target=%.3f price=%.3f%s",
                 number,
                 metrics["complete_map_frequency"], metrics["mean_rooms_unplaced"],
                 metrics["mean_unoccupied_cells"], metrics["loss_per_prefix"], metrics["learning_rate"],
                 metrics["placement_balance"], metrics["placement_balance_valid"],
-                metrics["edge_pair_balance"], metrics["edge_pair_balance_valid"], unique_log,
+                metrics["edge_pair_balance"], metrics["edge_pair_balance_valid"],
+                metrics["placement_target_imbalance"], metrics["placement_price_rms"], unique_log,
             )
             if number % self.config["checkpoint_period"] == 0:
                 self.save_checkpoint()

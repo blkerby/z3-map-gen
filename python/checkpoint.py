@@ -17,7 +17,7 @@ def save_tensors(path: Path, tensors: dict, metadata: dict):
     os.replace(temporary, path)
 
 
-def save_checkpoint(path, model, optimizer, completed_round, config, catalog_hash, room_ids, unique_maps):
+def save_checkpoint(path, model, optimizer, completed_round, config, catalog_hash, room_ids, unique_maps, placement_prices):
     tensors = {}
     for name, tensor in model.state_dict().items():
         tensors[f"model.{name}"] = tensor
@@ -26,6 +26,7 @@ def save_checkpoint(path, model, optimizer, completed_round, config, catalog_has
         for name, tensor in state.items():
             tensors[f"optimizer.{index}.{name}"] = tensor
     tensors["rng.cpu"] = torch.get_rng_state()
+    tensors["placement_prices"] = placement_prices
     if unique_maps is not None:
         tensors["unique_maps"] = torch.tensor(
             [list(layout) for layout in sorted(unique_maps)], dtype=torch.uint8,
@@ -44,7 +45,7 @@ def save_checkpoint(path, model, optimizer, completed_round, config, catalog_has
     save_tensors(path, tensors, metadata)
 
 
-def load_checkpoint(path, model, optimizer, config):
+def load_checkpoint(path, model, optimizer, config, placement_prices):
     with safe_open(path, framework="pt", device="cpu") as file:
         metadata = file.metadata()
         completed_round = int(metadata["completed_round"])
@@ -62,6 +63,7 @@ def load_checkpoint(path, model, optimizer, config):
                 _, index, name = key.split(".")
                 optimizer_state.setdefault(int(index), {})[name] = file.get_tensor(key)
         model.load_state_dict(model_state)
+        placement_prices.copy_(file.get_tensor("placement_prices"))
         optimizer.load_state_dict({
             "state": optimizer_state,
             "param_groups": json.loads(metadata["optimizer_param_groups"]),

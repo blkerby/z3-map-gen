@@ -3,13 +3,13 @@
   "device": "cuda:0",
   "seed": 0,
   "rounds": 10000000,
-  "checkpoint_period": 100,
-  "knot_episodes": [0, 200000],
+  "checkpoint_period": 500,
+  "knot_episodes": [0, 2000000],
   "model": {
     "room_embedding_dim": 16,
-    "position_embedding_dim": 8,
+    "position_embedding_dim": 16,
     "hidden_layers": 2,
-    "hidden_width": 256
+    "hidden_width": 2048
   },
   "optimizer": {
     "learning_rate": {"log": [0.0005, 0.00005]},
@@ -17,14 +17,18 @@
     "beta2": 0.999
   },
   "generation": {
-    "environment_count": 2048,
+    "environment_count": 1024,
     "batches_per_round": 1,
     "temperature": {"log": [0.2, 0.1]},
     "log_success_floor": -50.0
   },
+  "placement_controller": {
+    "gain": 0.005,
+    "leak": 0.05
+  },
   "train": {
     "batch_size": 256,
-    "batches_per_round": 40,
-    "experience_rounds": 10
+    "batches_per_round": 20,
+    "experience_rounds": 30
   }
 }
