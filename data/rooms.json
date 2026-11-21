@@ -37,6 +37,7 @@
           [
             "closed",
             "dual-small",
+            "dual-upper",
             "small-1",
             "small-2"
           ],
@@ -53,6 +54,7 @@
           [
             "closed",
             "dual-small",
+            "dual-upper",
             "small-1",
             "small-2"
           ]
@@ -74,6 +76,7 @@
         ],
         "south": [
           [
+            "closed",
             "small-1",
             "wide"
           ]
@@ -228,6 +231,7 @@
       "edges": {
         "north": [
           [
+            "closed",
             "small-1",
             "wide"
           ]
@@ -310,6 +314,7 @@
           [
             "closed",
             "dual-small",
+            "dual-upper",
             "small-1",
             "small-2"
           ]
@@ -339,6 +344,7 @@
           [
             "closed",
             "dual-small",
+            "dual-upper",
             "small-1",
             "small-2"
           ]
@@ -360,12 +366,18 @@
       "edges": {
         "north": [
           [
+            "closed",
+            "small-1",
+            "small-2",
             "wide"
           ]
         ],
         "south": [
           [
+            "closed",
             "dual-small",
+            "small-1",
+            "small-2",
             "wide"
           ]
         ],
@@ -373,6 +385,7 @@
           [
             "closed",
             "dual-small",
+            "dual-upper",
             "small-1",
             "small-2"
           ]
@@ -381,6 +394,7 @@
           [
             "closed",
             "dual-small",
+            "dual-upper",
             "small-1",
             "small-2"
           ]
@@ -410,6 +424,7 @@
         ],
         "east": [
           [
+            "closed",
             "small-2",
             "wide"
           ]
@@ -447,12 +462,14 @@
         ],
         "east": [
           [
+            "closed",
             "small-2",
             "wide"
           ]
         ],
         "west": [
           [
+            "closed",
             "small-2",
             "wide"
           ]
@@ -483,7 +500,9 @@
         ],
         "west": [
           [
+            "closed",
             "lake",
+            "small-2",
             "wide"
           ]
         ]
@@ -565,6 +584,7 @@
             "small-2"
           ],
           [
+            "closed",
             "small-1",
             "small-2",
             "wide"
@@ -599,6 +619,7 @@
           [
             "closed",
             "dual-small",
+            "dual-upper",
             "small-1",
             "small-2"
           ]
@@ -615,6 +636,8 @@
         "north": [
           [
             "dual-small",
+            "small-1",
+            "small-2",
             "wide"
           ]
         ],
@@ -626,8 +649,10 @@
         ],
         "east": [
           [
+            "closed",
             "light-and-mirror",
-            "light-only"
+            "light-only",
+            "small-2"
           ]
         ],
         "west": [
@@ -673,6 +698,7 @@
         ],
         "west": [
           [
+            "closed",
             "light-and-mirror",
             "light-only"
           ],
@@ -956,6 +982,7 @@
         "east": [
           [
             "dual-small",
+            "dual-upper",
             "wide"
           ]
         ],
@@ -977,6 +1004,7 @@
       "edges": {
         "north": [
           [
+            "closed",
             "small-1",
             "small-2",
             "wide"
@@ -999,6 +1027,7 @@
         "west": [
           [
             "dual-small",
+            "dual-upper",
             "wide"
           ]
         ]
@@ -1046,6 +1075,7 @@
       "edges": {
         "north": [
           [
+            "closed",
             "small-1",
             "wide"
           ]
@@ -1090,6 +1120,7 @@
         "east": [
           [
             "closed",
+            "dual-small",
             "small-1",
             "small-2"
           ]
@@ -1262,6 +1293,7 @@
       "edges": {
         "north": [
           [
+            "closed",
             "small-1",
             "wide"
           ],
@@ -1291,6 +1323,7 @@
         "west": [
           [
             "closed",
+            "small-1",
             "small-2"
           ],
           [
@@ -1354,13 +1387,16 @@
         "east": [
           [
             "dual-small",
+            "dual-upper",
             "small-2"
           ]
         ],
         "west": [
           [
+            "closed",
             "light-and-mirror",
-            "light-only"
+            "light-only",
+            "small-2"
           ]
         ]
       }
@@ -1393,6 +1429,7 @@
         "west": [
           [
             "dual-small",
+            "dual-upper",
             "lake",
             "small-2",
             "wide"
