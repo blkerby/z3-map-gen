@@ -19,9 +19,17 @@ Map `i` (zero-based) starts at byte `124 + 40 * i`. The total file size is `124 
 Run from the project root with the `map-gen` conda environment active:
 
 ```sh
-python scripts/export_map_pool.py runs/20261104-051118-246400/experience runs/20261104-051118-246400/map_pool.bin --count 100000
+python scripts/export_map_pool.py runs/20261104-051118-246400/experience runs/20261104-051118-246400/map_pool.bin --count 100000 --end-round 500
 ```
 
-The exporter reads `round_*.safetensors` in descending numeric round order and requires matching catalog hashes and ordered room IDs across the files it reads. Only episodes for which every stored outcome flag is true are eligible, matching training's definition of success. Layouts are deduplicated by room anchors regardless of placement order. Collection stops as soon as the requested number of distinct eligible layouts is reached. Within each round, layouts are sorted by their encoded bytes for reproducible selection. The pool favors recent experience rather than sampling uniformly across the run.
+The exporter reads `round_*.safetensors` in descending numeric round order and requires matching catalog hashes and ordered room IDs across the files it reads. With `--end-round`, only rounds at or below that number are eligible. If omitted, collection starts at the newest available round. Only episodes for which every stored outcome flag is true are eligible, matching training's definition of success. Layouts are deduplicated by room anchors regardless of placement order. Collection stops as soon as the requested number of distinct eligible layouts is reached. Within each round, layouts are sorted by their encoded bytes for reproducible selection. The pool favors recent experience rather than sampling uniformly across the run.
 
-Input tensors are read one file at a time, while the collected layouts stay in memory for deduplication. Memory is bounded by the requested pool size plus one input file's tensors and layouts. Use a completed, stable input directory; empty or damaged inputs encountered during collection cause an error rather than being silently skipped. Fewer eligible layouts than requested also cause an error. The exporter never overwrites an existing output file and writes only after collecting the requested number of maps.
+Input tensors are read one file at a time, while the collected layouts stay in memory for deduplication. Memory is bounded by the requested pool size plus one input file's tensors and layouts. Use a completed, stable input directory; empty or damaged inputs encountered during collection cause an error rather than being silently skipped. Fewer eligible layouts than requested also cause an error. The exporter writes only after collecting the requested number of maps. Pass `--overwrite` to replace an existing output file with the completed pool.
+
+The exporter prints placement balance (`bal`), edge-pair balance (`edge`), and placement target imbalance (`target`) over the exported layouts. To print the same stats for an existing pool, run:
+
+```sh
+python scripts/compute_pool_stats.py path/to/map_pool.bin
+```
+
+Both commands default to `data/rooms.json` from the project. For a pool or experience from a different catalog, pass `--room-data path/to/rooms.json` with the original catalog JSON matching the stored hash.
