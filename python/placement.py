@@ -36,11 +36,13 @@ class PlacementController:
         totals = counts.sum(dim=1, keepdim=True)
         observed = counts / totals.clamp_min(1)
         supported = self.target > 0
-        error = observed / self.target.masked_fill(~supported, 1) - 1
+        target_denominator = self.target.masked_fill(~supported, float("inf"))
+        error = observed / target_denominator - 1
         error.masked_fill_(~supported | (totals == 0), 0)
         self.prices.mul_(1 - self.leak).add_(error, alpha=self.gain)
-        imbalance = (error.square() * self.target).sum(dim=1)
+        pairs = (totals * (totals - 1)).sum().item()
+        weighted_collisions = (counts * (counts - 1) / target_denominator).sum().item()
         return {
-            "placement_target_imbalance": imbalance.sum().item() / (totals > 0).sum().clamp_min(1).item(),
+            "placement_target_imbalance": weighted_collisions / pairs if pairs else float("nan"),
             "placement_price_rms": (self.prices.square() * self.target).sum(dim=1).mean().sqrt().item(),
         }
