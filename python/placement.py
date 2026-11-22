@@ -12,9 +12,7 @@ class PlacementController:
     A room with no observations receives decay only.
     """
 
-    def __init__(self, room_sizes, device, *, gain, leak):
-        self.gain = gain
-        self.leak = leak
+    def __init__(self, room_sizes, device):
         self.target = torch.zeros((len(room_sizes), BOARD_SIZE, BOARD_SIZE), device=device)
         for room, (width, height) in enumerate(room_sizes):
             if (width, height) == (2, 2):
@@ -29,7 +27,7 @@ class PlacementController:
         self.prices = torch.zeros_like(self.target)
 
     @torch.no_grad()
-    def update(self, actions):
+    def update(self, actions, *, gain, leak):
         placements = actions[actions[:, :, 0] >= 0].to(self.prices.device)
         indices = placements[:, 0] * BOARD_SIZE**2 + placements[:, 2] * BOARD_SIZE + placements[:, 1]
         counts = torch.bincount(indices, minlength=self.prices.numel()).reshape_as(self.prices)
@@ -39,7 +37,7 @@ class PlacementController:
         target_denominator = self.target.masked_fill(~supported, float("inf"))
         error = observed / target_denominator - 1
         error.masked_fill_(~supported | (totals == 0), 0)
-        self.prices.mul_(1 - self.leak).add_(error, alpha=self.gain)
+        self.prices.mul_(1 - leak).add_(error, alpha=gain)
         pairs = (totals * (totals - 1)).sum().item()
         weighted_collisions = (counts * (counts - 1) / target_denominator).sum().item()
         return {

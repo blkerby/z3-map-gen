@@ -44,8 +44,8 @@ def format_pool_stats(pool, room_data):
 
     bal = placement_balance(actions, room_sizes)
     edge = edge_pair_balance(actions, room_sizes)
-    controller = PlacementController(room_sizes, "cpu", gain=0, leak=1)
-    target = controller.update(actions)["placement_target_imbalance"]
+    controller = PlacementController(room_sizes, "cpu")
+    target = controller.update(actions, gain=0, leak=1)["placement_target_imbalance"]
     return f"bal={bal:.2f} edge={edge:.2f} target={target:.3f}"
 
 

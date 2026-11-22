@@ -41,6 +41,8 @@ def load_config(path):
         ("optimizer", "beta1"),
         ("optimizer", "beta2"),
         ("generation", "temperature"),
+        ("placement_controller", "gain"),
+        ("placement_controller", "leak"),
     )
     if any(isinstance(config[group][key], dict) for group, key in scheduled_settings):
         knots = config["knot_episodes"]
@@ -68,16 +70,13 @@ def load_config(path):
                 raise ValueError("generation.temperature values must be positive")
             if key in ("beta1", "beta2") and value >= 1:
                 raise ValueError(f"optimizer.{key} values must be less than one")
+            if key == "leak" and not 0 < value <= 1:
+                raise ValueError("placement_controller.leak values must be in (0, 1]")
             if kind == "log" and value == 0:
                 raise ValueError(f"{group}.{key} values must be positive for a log schedule")
     floor = config["generation"]["log_success_floor"]
     if not math.isfinite(floor) or floor >= 0:
         raise ValueError("generation.log_success_floor must be finite and negative")
-    controller = config["placement_controller"]
-    if not math.isfinite(controller["gain"]) or controller["gain"] < 0:
-        raise ValueError("placement_controller.gain must be finite and nonnegative")
-    if not math.isfinite(controller["leak"]) or not 0 < controller["leak"] <= 1:
-        raise ValueError("placement_controller.leak must be in (0, 1]")
     config["room_data"] = str(Path(config["room_data"]).resolve())
     return config
 
@@ -107,9 +106,7 @@ class TrainingSession:
         self.catalog = Catalog(config["room_data"])
         self.catalog_hash = hashlib.sha256(Path(config["room_data"]).read_bytes()).hexdigest()
         self.device = torch.device(config["device"])
-        self.placement_controller = PlacementController(
-            self.catalog.room_sizes, self.device, **config["placement_controller"],
-        )
+        self.placement_controller = PlacementController(self.catalog.room_sizes, self.device)
         random.seed(config["seed"])
         torch.manual_seed(config["seed"])
         self.model = OutcomeModel(self.catalog, **config["model"]).to(self.device)
@@ -279,7 +276,11 @@ class TrainingSession:
             data = self.generate_round()
             self.experience[number] = ExperienceRound(**data)
             metrics = self.train_round(number)
-            metrics.update(self.placement_controller.update(data["actions"]))
+            controller_settings = instantiate_schedules(
+                self.config["placement_controller"], self.config.get("knot_episodes"),
+                number * len(data["actions"]),
+            )
+            metrics.update(self.placement_controller.update(data["actions"], **controller_settings))
             room_count = len(self.catalog.room_ids)
             outcomes = data["outcomes"].float()
             valid_actions = data["actions"][data["outcomes"].all(dim=1)]

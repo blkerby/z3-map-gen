@@ -23,8 +23,8 @@
     "log_success_floor": -50.0
   },
   "placement_controller": {
-    "gain": 0.005,
-    "leak": 0.002
+    "gain": {"log": [0.2, 0.005]},
+    "leak": {"log": [0.02, 0.005]}
   },
   "train": {
     "batch_size": 256,
