@@ -24,7 +24,7 @@
   },
   "placement_controller": {
     "gain": 0.005,
-    "leak": 0.005
+    "leak": 0.002
   },
   "train": {
     "batch_size": 256,

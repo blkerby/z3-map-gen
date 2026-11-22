@@ -5,18 +5,19 @@ import logging
 import math
 import os
 import random
+import shutil
 import signal
 import sys
 from bisect import bisect_right
 from datetime import datetime
+from itertools import accumulate
 from pathlib import Path
 
 import torch
-from safetensors import safe_open
 from torch.nn import functional as F
 
-from checkpoint import load_checkpoint, save_checkpoint, save_tensors
-from experience import ExperienceRound, collect_unique_maps, edge_pair_balance, placement_balance
+from checkpoint import load_checkpoint, prune_checkpoints, round_files, save_checkpoint, save_tensors
+from experience import ExperienceRound, edge_pair_balance, map_anchors, placement_balance
 from generation import sample_actions
 from model import OutcomeModel
 from placement import PlacementController
@@ -100,14 +101,9 @@ def instantiate_schedules(settings, knots, position):
 
 
 class TrainingSession:
-    def __init__(self, config, resume, log_unique_maps=False, log_cumulative_unique_maps=False):
+    def __init__(self, config, resume, log_unique_maps=False):
         self.config = config
         self.log_unique_maps = log_unique_maps
-        self.unique_maps = set() if log_cumulative_unique_maps else None
-        if resume is None:
-            self.run_dir = Path("runs") / datetime.now().strftime("%Y%m%d-%H%M%S")
-        else:
-            self.run_dir = resume.resolve().parent.parent
         self.catalog = Catalog(config["room_data"])
         self.catalog_hash = hashlib.sha256(Path(config["room_data"]).read_bytes()).hexdigest()
         self.device = torch.device(config["device"])
@@ -128,27 +124,40 @@ class TrainingSession:
         )
         self.completed_round = 0
         self.experience = {}
+        self.pending_maps = []
         self.stop_requested = False
+        run_name = datetime.now().strftime("%Y%m%d%H%M%S")
         if resume is None:
+            self.run_dir = Path("runs") / run_name
             self.run_dir.mkdir(parents=True, exist_ok=False)
         else:
-            self.completed_round, unique_maps = load_checkpoint(
-                resume, self.model, self.optimizer, config,
+            resume = resume.resolve()
+            self.completed_round, replay = load_checkpoint(
+                resume, self.model, self.optimizer, config, self.catalog_hash,
                 self.placement_controller.prices,
             )
-            if unique_maps is not None:
-                self.unique_maps = unique_maps
-            elif log_cumulative_unique_maps:
-                for number in range(1, self.completed_round + 1):
-                    path = self.run_dir / "experience" / f"round_{number}.safetensors"
-                    with safe_open(path, framework="pt", device="cpu") as file:
-                        if file.metadata()["catalog_hash"] != self.catalog_hash:
-                            raise ValueError(f"Experience catalog does not match: {path}")
-                        unique_maps, _ = collect_unique_maps(
-                            file.get_tensor("actions"), file.get_tensor("outcomes"),
-                        )
-                        self.unique_maps.update(unique_maps)
-        for name in ("experience", "checkpoints", "metrics"):
+            self.experience = {number: ExperienceRound(**data) for number, data in replay.items()}
+            self.run_dir = resume.parent.parent
+            checkpoints = round_files(self.run_dir / "checkpoints")
+            if checkpoints.get(self.completed_round) != resume:
+                raise ValueError(f"Expected a checkpoint in its run directory: {resume}")
+            batches = round_files(self.run_dir / "successful_maps")
+            if self.completed_round and self.completed_round not in batches:
+                raise ValueError(f"Checkpoint is missing its successful-map batch: {resume}")
+            if self.completed_round < max(checkpoints):
+                self.run_dir = self.run_dir.with_name(f"{run_name}-from-{self.completed_round}")
+                self.run_dir.mkdir()
+                (self.run_dir / "checkpoints").mkdir()
+                (self.run_dir / "successful_maps").mkdir()
+                for number, path in batches.items():
+                    if number <= self.completed_round:
+                        shutil.copy2(path, self.run_dir / "successful_maps" / path.name)
+                shutil.copy2(resume, self.run_dir / "checkpoints" / resume.name)
+            else:
+                for number, path in batches.items():
+                    if number > self.completed_round:
+                        path.unlink()
+        for name in ("successful_maps", "checkpoints", "metrics"):
             (self.run_dir / name).mkdir(exist_ok=True)
         (self.run_dir / "config.json").write_text(json.dumps(config, indent=2) + "\n")
 
@@ -211,16 +220,13 @@ class TrainingSession:
         for old_round in list(self.experience):
             if old_round < first_round:
                 del self.experience[old_round]
-        for number in range(first_round, round_number + 1):
-            if number not in self.experience:
-                path = self.run_dir / "experience" / f"round_{number}.safetensors"
-                self.experience[number] = ExperienceRound.load(path, self.catalog_hash)
+        replay_rounds = tuple(self.experience)
         total_loss = 0.0
         for _ in range(settings["batches_per_round"]):
             episodes = []
             labels = []
             for _ in range(settings["batch_size"]):
-                number = random.randrange(first_round, round_number + 1)
+                number = random.choice(replay_rounds)
                 actions, outcomes = self.experience[number].sample_state()
                 episodes.append(actions)
                 labels.append(outcomes)
@@ -242,36 +248,42 @@ class TrainingSession:
         }
 
     def save_checkpoint(self):
-        path = self.run_dir / "checkpoints" / f"round_{self.completed_round}.safetensors"
+        filename = f"round_{self.completed_round}.safetensors"
+        if self.pending_maps:
+            save_tensors(
+                self.run_dir / "successful_maps" / filename,
+                {
+                    "anchors": torch.cat(self.pending_maps),
+                    "offsets": torch.tensor(list(accumulate(map(len, self.pending_maps), initial=0))),
+                },
+                {
+                    "catalog_hash": self.catalog_hash,
+                    "room_ids": json.dumps(self.catalog.room_ids),
+                },
+            )
+        path = self.run_dir / "checkpoints" / filename
         save_checkpoint(
             path, self.model, self.optimizer, self.completed_round, self.config,
-            self.catalog_hash, self.catalog.room_ids,
-            self.unique_maps,
-            self.placement_controller.prices,
+            self.catalog_hash, self.catalog.room_ids, self.experience, self.placement_controller.prices,
         )
+        self.pending_maps.clear()
+        prune_checkpoints(path.parent, self.completed_round, self.config["checkpoint_period"])
         logging.info("Saved checkpoint: %s", path)
 
     def run(self):
-        last_saved_round = None
-        torch.set_float32_matmul_precision('high')        
+        last_saved_round = self.completed_round if self.completed_round else None
+        torch.set_float32_matmul_precision('high')
         for number in range(self.completed_round + 1, self.config["rounds"] + 1):
             if self.stop_requested:
                 break
             data = self.generate_round()
-            save_tensors(
-                self.run_dir / "experience" / f"round_{number}.safetensors", data,
-                {
-                    "round": str(number),
-                    "catalog_hash": self.catalog_hash,
-                    "room_ids": json.dumps(self.catalog.room_ids),
-                    "config": json.dumps(self.config),
-                },
-            )
+            self.experience[number] = ExperienceRound(**data)
             metrics = self.train_round(number)
             metrics.update(self.placement_controller.update(data["actions"]))
             room_count = len(self.catalog.room_ids)
             outcomes = data["outcomes"].float()
             valid_actions = data["actions"][data["outcomes"].all(dim=1)]
+            anchors = map_anchors(valid_actions)
             metrics.update({
                 "round": number,
                 "complete_map_frequency": outcomes[:, :room_count].all(dim=1).float().mean().item(),
@@ -285,27 +297,23 @@ class TrainingSession:
                 "edge_pair_balance_valid": edge_pair_balance(valid_actions, self.catalog.room_sizes),
             })
             unique_log = ""
-            if self.log_unique_maps or self.unique_maps is not None:
-                unique_maps, counts = collect_unique_maps(data["actions"], data["outcomes"])
-                if self.log_unique_maps:
-                    metrics["unique_maps"] = len(unique_maps)
-                    unique_log += f" uniq={len(unique_maps)}"
-                    valid_count = counts.sum().item()
-                    collision_probability = None
-                    if valid_count >= 2:
-                        collision_probability = (counts * (counts - 1)).sum().item() / (
-                            valid_count * (valid_count - 1)
-                        )
-                    metrics["map_collision_probability"] = collision_probability
-                    if collision_probability is None:
-                        unique_log += " collision=n/a"
-                    else:
-                        unique_log += f" collision={collision_probability:.5f}"
-                if self.unique_maps is not None:
-                    self.unique_maps.update(unique_maps)
-                    metrics["cumulative_unique_maps"] = len(self.unique_maps)
-                    unique_log += f" cumul_uniq={len(self.unique_maps)}"
+            if self.log_unique_maps:
+                unique_maps, counts = anchors.unique(dim=0, return_counts=True)
+                metrics["unique_maps"] = len(unique_maps)
+                unique_log += f" uniq={len(unique_maps)}"
+                valid_count = len(anchors)
+                collision_probability = None
+                if valid_count >= 2:
+                    collision_probability = (counts * (counts - 1)).sum().item() / (
+                        valid_count * (valid_count - 1)
+                    )
+                metrics["map_collision_probability"] = collision_probability
+                if collision_probability is None:
+                    unique_log += " collision=n/a"
+                else:
+                    unique_log += f" collision={collision_probability:.5f}"
             (self.run_dir / "metrics" / f"round_{number}.json").write_text(json.dumps(metrics) + "\n")
+            self.pending_maps.append(anchors)
             self.completed_round = number
             logging.info(
                 "Round %s: complete=%.3f rooms=%.2f cells=%.2f loss=%.4f lr=%.6g "
@@ -329,19 +337,13 @@ class TrainingSession:
 def main():
     parser = argparse.ArgumentParser(description="Train the overworld outcome predictor")
     parser.add_argument("config", type=Path)
-    parser.add_argument("--resume", type=Path, help="Resume a safetensors checkpoint in the same run")
+    parser.add_argument("--resume", type=Path, help="Resume a checkpoint and fork the run if a newer checkpoint exists")
     parser.add_argument(
         "--log-unique-maps", action="store_true",
         help="Log unique valid maps and estimated collision probability in each round",
     )
-    parser.add_argument(
-        "--log-cumulative-unique-maps", action="store_true",
-        help="Log unique valid maps since the run began; resume saved tracking or reconstruct from experience",
-    )
     args = parser.parse_args()
-    session = TrainingSession(
-        load_config(args.config), args.resume, args.log_unique_maps, args.log_cumulative_unique_maps,
-    )
+    session = TrainingSession(load_config(args.config), args.resume, args.log_unique_maps)
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(message)s",

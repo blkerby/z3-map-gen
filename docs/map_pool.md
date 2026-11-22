@@ -14,19 +14,25 @@ Each record contains one byte per room in header order, giving its top-left anch
 
 Map `i` (zero-based) starts at byte `124 + 40 * i`. The total file size is `124 + 40 * map_count`; 100,000 maps occupy 4,000,124 bytes. A Rust reader needs only byte slices and `u16::from_le_bytes` / `u32::from_le_bytes`. Future changes to board dimensions, room count, or record encoding require a new magic/version.
 
-# Exporting experience
+# Successful-map batches
+
+Training writes a safetensors file under `successful_maps/` for each checkpoint that advances the run. The file name `round_<number>.safetensors` gives the last round in the batch. Its `anchors` tensor contains one 40-byte row per successful episode, in round order, using the same room-anchor encoding as the map pool. The `offsets` tensor starts at zero and gives the cumulative row count after each round. The metadata contains the catalog SHA-256 and ordered room IDs. An episode is successful when every outcome flag is true.
+
+Batches are published before their checkpoints. The latest published checkpoint bounds the committed batches, and checkpoint retention preserves the map batches. Resuming an older checkpoint creates a sibling run with the map batches through that checkpoint.
+
+# Exporting a map pool
 
 Run from the project root with the `map-gen` conda environment active:
 
 ```sh
-python scripts/export_map_pool.py runs/20261104-051118/experience runs/20261104-051118/map_pool.bin --count 100000 --end-round 500
+python scripts/export_map_pool.py runs/20261104051118 --count 100000 --end-round 500
 ```
 
-Pass an existing directory as the output to generate `map-pool-<run-name>-<ending-round>.bin` inside it. The run name comes from the parent of the experience directory, and the ending round is the newest eligible round file.
+The exporter writes `<run>/exports/map-pool-<run-name>-<ending-round>.bin`. The ending round is the latest committed round, capped by `--end-round` when supplied.
 
-The exporter reads `round_*.safetensors` in descending numeric round order and requires matching catalog hashes and ordered room IDs across the files it reads. With `--end-round`, only rounds at or below that number are eligible. If omitted, collection starts at the newest available round. Only episodes for which every stored outcome flag is true are eligible, matching training's definition of success. Layouts are deduplicated by room anchors regardless of placement order. Collection stops as soon as the requested number of distinct eligible layouts is reached. Within each round, layouts are sorted by their encoded bytes for reproducible selection. The pool favors recent experience rather than sampling uniformly across the run.
+The exporter reads successful-map rounds newest first and requires matching catalog hashes and ordered room IDs across the files it reads. Within each round, layouts are sorted by their encoded bytes for reproducible selection. Collection stops as soon as the requested number of distinct layouts is reached.
 
-Input tensors are read one file at a time, while the collected layouts stay in memory for deduplication. Memory is bounded by the requested pool size plus one input file's tensors and layouts. Use a completed, stable input directory; empty or damaged inputs encountered during collection cause an error rather than being silently skipped. Fewer eligible layouts than requested also cause an error. The exporter writes only after collecting the requested number of maps. Pass `--overwrite` to replace an existing output file with the completed pool.
+Input tensors are read one batch at a time. Memory is bounded by the requested pool size, one batch's tensors, and one round's decoded layouts. Use a completed, stable run directory. The exporter writes the pool after collecting the requested number of maps. Pass `--overwrite` to replace an existing output file with the completed pool.
 
 The exporter prints placement balance (`bal`), edge-pair balance (`edge`), and placement target imbalance (`target`) over the exported layouts. To print the same stats for an existing pool, run:
 
@@ -34,4 +40,4 @@ The exporter prints placement balance (`bal`), edge-pair balance (`edge`), and p
 python scripts/compute_pool_stats.py path/to/map_pool.bin
 ```
 
-Both commands default to `data/rooms.json` from the project. For a pool or experience from a different catalog, pass `--room-data path/to/rooms.json` with the original catalog JSON matching the stored hash.
+Both commands default to `data/rooms.json` from the project. For a pool or run from a different catalog, pass `--room-data path/to/rooms.json` with the original catalog JSON matching the stored hash.
