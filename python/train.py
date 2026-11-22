@@ -105,7 +105,7 @@ class TrainingSession:
         self.log_unique_maps = log_unique_maps
         self.unique_maps = set() if log_cumulative_unique_maps else None
         if resume is None:
-            self.run_dir = Path("runs") / datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+            self.run_dir = Path("runs") / datetime.now().strftime("%Y%m%d-%H%M%S")
         else:
             self.run_dir = resume.resolve().parent.parent
         self.catalog = Catalog(config["room_data"])

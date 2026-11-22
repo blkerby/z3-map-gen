@@ -19,8 +19,10 @@ Map `i` (zero-based) starts at byte `124 + 40 * i`. The total file size is `124 
 Run from the project root with the `map-gen` conda environment active:
 
 ```sh
-python scripts/export_map_pool.py runs/20261104-051118-246400/experience runs/20261104-051118-246400/map_pool.bin --count 100000 --end-round 500
+python scripts/export_map_pool.py runs/20261104-051118/experience runs/20261104-051118/map_pool.bin --count 100000 --end-round 500
 ```
+
+Pass an existing directory as the output to generate `map-pool-<run-name>-<ending-round>.bin` inside it. The run name comes from the parent of the experience directory, and the ending round is the newest eligible round file.
 
 The exporter reads `round_*.safetensors` in descending numeric round order and requires matching catalog hashes and ordered room IDs across the files it reads. With `--end-round`, only rounds at or below that number are eligible. If omitted, collection starts at the newest available round. Only episodes for which every stored outcome flag is true are eligible, matching training's definition of success. Layouts are deduplicated by room anchors regardless of placement order. Collection stops as soon as the requested number of distinct eligible layouts is reached. Within each round, layouts are sorted by their encoded bytes for reproducible selection. The pool favors recent experience rather than sampling uniformly across the run.
 

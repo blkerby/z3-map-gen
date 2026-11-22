@@ -19,7 +19,7 @@ from experience import collect_unique_maps
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("experience", type=Path, help="Directory containing round_*.safetensors")
-    parser.add_argument("output", type=Path, help="Output map pool file")
+    parser.add_argument("output", type=Path, help="Output map pool file or existing directory")
     parser.add_argument("--count", type=int, default=100_000, help="Number of maps (default: 100000)")
     parser.add_argument("--end-round", type=int, help="Newest eligible round (inclusive)")
     parser.add_argument("--overwrite", action="store_true", help="Replace an existing output file")
@@ -27,22 +27,28 @@ def main():
     args = parser.parse_args()
     if not 1 <= args.count <= 0xFFFFFFFF:
         parser.error("count must fit a positive u32")
-    if not args.overwrite and args.output.exists():
-        parser.error(f"output already exists: {args.output} (use --overwrite to replace it)")
     rounds = sorted(
         ((int(path.stem.removeprefix("round_")), path) for path in args.experience.glob("round_*.safetensors")),
         reverse=True,
     )
-    paths = [path for number, path in rounds if args.end_round is None or number <= args.end_round]
-    if not paths:
+    if args.end_round is not None:
+        rounds = [(number, path) for number, path in rounds if number <= args.end_round]
+    if not rounds:
         parser.error("no eligible experience files found")
+    output_path = args.output
+    if output_path.is_dir():
+        run_name = args.experience.resolve().parent.name
+        ending_round, _ = rounds[0]
+        output_path = output_path / f"map-pool-{run_name}-{ending_round}.bin"
+    if not args.overwrite and output_path.exists():
+        parser.error(f"output already exists: {output_path} (use --overwrite to replace it)")
 
     torch.set_num_threads(1)
     seen = set()
     sample = []
     catalog_hash = None
     room_ids = None
-    for index, path in enumerate(paths, 1):
+    for index, (_, path) in enumerate(rounds, 1):
         with safe_open(path, framework="pt", device="cpu") as file:
             metadata = file.metadata()
             file_hash = bytes.fromhex(metadata["catalog_hash"])
@@ -64,8 +70,8 @@ def main():
             sample.append(layout)
             if len(sample) == args.count:
                 break
-        if index % 1000 == 0 or index == len(paths) or len(sample) == args.count:
-            print(f"{index}/{len(paths)} files: {len(seen)} distinct successful maps", flush=True)
+        if index % 1000 == 0 or index == len(rounds) or len(sample) == args.count:
+            print(f"{index}/{len(rounds)} files: {len(seen)} distinct successful maps", flush=True)
         if len(sample) == args.count:
             break
 
@@ -75,14 +81,14 @@ def main():
     pool.extend(b"".join(sample))
     stats = format_pool_stats(pool, args.room_data)
     if args.overwrite:
-        with TemporaryDirectory(dir=args.output.parent) as directory:
-            staged = Path(directory) / args.output.name
+        with TemporaryDirectory(dir=output_path.parent) as directory:
+            staged = Path(directory) / output_path.name
             staged.write_bytes(pool)
-            staged.replace(args.output)
+            staged.replace(output_path)
     else:
-        with args.output.open("xb") as output:
+        with output_path.open("xb") as output:
             output.write(pool)
-    print(f"Wrote {len(sample)} maps ({args.output.stat().st_size} bytes) to {args.output}")
+    print(f"Wrote {len(sample)} maps ({output_path.stat().st_size} bytes) to {output_path}")
     print(stats)
 
 
