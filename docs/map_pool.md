@@ -30,9 +30,13 @@ python scripts/export_map_pool.py runs/20261104051118 --count 100000 --end-round
 
 The exporter writes `<run>/exports/map-pool-<run-name>-<ending-round>.bin`. The ending round is the latest committed round, capped by `--end-round` when supplied.
 
-The exporter reads successful-map rounds newest first and requires matching catalog hashes and ordered room IDs across the files it reads. Within each round, layouts are sorted by their encoded bytes for reproducible selection. Collection stops as soon as the requested number of distinct layouts is reached.
+The exporter reads successful-map rounds newest first and requires matching catalog hashes and ordered room IDs across the files it reads. Within each round, layouts are sorted by their encoded bytes for reproducible selection. By default, collection stops as soon as the requested number of distinct layouts is reached.
 
-Input tensors are read one batch at a time. Memory is bounded by the requested pool size, one batch's tensors, and one round's decoded layouts. Use a completed, stable run directory. The exporter writes the pool after collecting the requested number of maps. Pass `--overwrite` to replace an existing output file with the completed pool.
+Input tensors are read one batch at a time. By default, memory is bounded by the requested pool size, one batch's tensors, and one round's decoded layouts. Use a completed, stable run directory. The exporter writes the pool after collecting the requested number of maps. Pass `--overwrite` to replace an existing output file with the completed pool.
+
+Use `--balance --candidate-count 300000` to consider up to 300,000 distinct layouts for the export. Set `--candidate-count` at least as high as `--count`. If fewer candidates are available, the exporter can still proceed as long as it can fill the pool. Memory and optimization time scale with the number of candidates.
+
+Balanced export optimizes layout inclusion probabilities against the placement target, then uses randomized rounding to draw the requested number of distinct layouts. It keeps the newest-first pool if the draw fails to lower the measured `target`. The output path and overwrite rules are the same for both modes.
 
 The exporter prints placement balance (`bal`), edge-pair balance (`edge`), and placement target imbalance (`target`) over the exported layouts. To print the same stats for an existing pool, run:
 
