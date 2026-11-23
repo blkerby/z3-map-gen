@@ -36,6 +36,11 @@ impl PyCatalog {
         self.inner.rooms.iter().map(|room| room.size).collect()
     }
 
+    #[getter]
+    fn segment_matches(&self) -> Vec<Vec<bool>> {
+        self.inner.segment_matches.clone()
+    }
+
     #[getter(room_cell_count)]
     fn get_room_cell_count(&self) -> i8 {
         let mut count = 0;

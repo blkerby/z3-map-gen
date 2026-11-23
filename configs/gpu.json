@@ -26,6 +26,10 @@
     "gain": {"log": [0.2, 0.005]},
     "leak": {"log": [0.02, 0.005]}
   },
+  "edge_controller": {
+    "gain": {"log": [1.0, 0.025]},
+    "leak": {"log": [0.02, 0.005]}
+  },
   "train": {
     "batch_size": 256,
     "batches_per_round": 20,

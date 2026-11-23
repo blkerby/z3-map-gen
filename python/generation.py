@@ -13,6 +13,7 @@ def score_candidates(
     candidates: CandidateFeatures,
     log_success_floor: float,
     placement_prices: torch.Tensor,
+    edge_prices: torch.Tensor,
 ) -> torch.Tensor:
     """Score candidate completion and expected subsequent placement costs."""
     device = model.room_embedding.weight.device
@@ -21,12 +22,15 @@ def score_candidates(
     features = candidates.features
     room_positions = features.room_positions.to(device)
     room_cells = features.room_cells.to(device)
-    return _score_features(model, room_positions, room_cells, log_success_floor, placement_prices)
+    placements = torch.tensor(candidates.actions, device=device)
+    return _score_features(
+        model, room_positions, room_cells, placements, log_success_floor, placement_prices, edge_prices,
+    )
 
 
 @torch.compile(dynamic=True)
-def _score_features(model, room_positions, room_cells, log_success_floor, placement_prices):
-    anchor_logits, cell_logits = model(room_positions, room_cells)
+def _score_features(model, room_positions, room_cells, placements, log_success_floor, placement_prices, edge_prices):
+    anchor_logits, cell_logits, edge_logits = model(room_positions, room_cells)
     anchor_log_probs = F.log_softmax(anchor_logits, dim=-1)[..., :-1]
     room_log_success = anchor_log_probs.logsumexp(dim=-1).clamp_min(log_success_floor)
     future_prices = (anchor_log_probs.exp() * placement_prices).sum(dim=-1)
@@ -34,7 +38,17 @@ def _score_features(model, room_positions, room_cells, log_success_floor, placem
     cell_scores = F.logsigmoid(cell_logits).clamp_min(log_success_floor)
     cell_scores = cell_scores.masked_fill(room_cells == CELL_FAILED, log_success_floor)
     cell_scores = cell_scores.masked_fill(room_cells >= 0, 0)
-    return room_scores.sum(dim=-1) + cell_scores.sum(dim=-1)
+    rooms, x, y = placements.unbind(dim=-1)
+    immediate_placement = placement_prices[rooms, y * BOARD_SIZE + x]
+    formed, unresolved = model.edge_pairs.contacts(room_positions)
+    touching_candidate = (rooms[:, None, None] == model.edge_pairs.rooms).any(dim=1)
+    edge_probability = torch.where(
+        formed & touching_candidate, 1.0, edge_logits.sigmoid().masked_fill(~unresolved, 0),
+    )
+    return (
+        room_scores.sum(dim=-1) + cell_scores.sum(dim=-1)
+        - immediate_placement - (edge_probability * edge_prices).sum(dim=-1)
+    )
 
 
 @torch.no_grad()
@@ -45,6 +59,7 @@ def sample_actions(
     temperature: float,
     log_success_floor: float,
     placement_prices: torch.Tensor,
+    edge_prices: torch.Tensor,
 ) -> list[tuple[int, int, int] | None]:
     """Sample once per environment; temperature must be positive and finite."""
     candidates = environments.extract_candidate_features()
@@ -53,9 +68,7 @@ def sample_actions(
     environment_count = len(offsets) - 1
     if not actions:
         return [None] * environment_count
-    scores = score_candidates(model, candidates, log_success_floor, placement_prices)
-    placements = torch.tensor(actions, device=scores.device)
-    scores -= placement_prices[placements[:, 0], placements[:, 2] * BOARD_SIZE + placements[:, 1]]
+    scores = score_candidates(model, candidates, log_success_floor, placement_prices, edge_prices)
     counts = [end - start for start, end in zip(offsets[:-1], offsets[1:])]
     device = scores.device
     counts_tensor = torch.tensor(counts, device=device)

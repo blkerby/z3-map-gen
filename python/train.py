@@ -17,11 +17,12 @@ import torch
 from torch.nn import functional as F
 
 from checkpoint import load_checkpoint, prune_checkpoints, round_files, save_checkpoint, save_tensors
-from experience import ExperienceRound, edge_pair_balance, map_anchors, placement_balance
+from edges import EdgeController
+from experience import ExperienceRound, edge_pair_balance, edge_pair_counts, map_anchors, placement_balance
 from generation import sample_actions
 from model import OutcomeModel
 from placement import PlacementController
-from z3_map_gen import EPISODE_LENGTH, Catalog, EnvironmentGroup
+from z3_map_gen import BOARD_SIZE, EPISODE_LENGTH, Catalog, EnvironmentGroup
 
 
 def load_config(path):
@@ -43,6 +44,8 @@ def load_config(path):
         ("generation", "temperature"),
         ("placement_controller", "gain"),
         ("placement_controller", "leak"),
+        ("edge_controller", "gain"),
+        ("edge_controller", "leak"),
     )
     if any(isinstance(config[group][key], dict) for group, key in scheduled_settings):
         knots = config["knot_episodes"]
@@ -71,7 +74,7 @@ def load_config(path):
             if key in ("beta1", "beta2") and value >= 1:
                 raise ValueError(f"optimizer.{key} values must be less than one")
             if key == "leak" and not 0 < value <= 1:
-                raise ValueError("placement_controller.leak values must be in (0, 1]")
+                raise ValueError(f"{group}.leak values must be in (0, 1]")
             if kind == "log" and value == 0:
                 raise ValueError(f"{group}.{key} values must be positive for a log schedule")
     floor = config["generation"]["log_success_floor"]
@@ -110,6 +113,7 @@ class TrainingSession:
         random.seed(config["seed"])
         torch.manual_seed(config["seed"])
         self.model = OutcomeModel(self.catalog, **config["model"]).to(self.device)
+        self.edge_controller = EdgeController(self.model.edge_pairs, self.catalog.room_sizes, self.device)
         self.model.compile(dynamic=True)
         settings = instantiate_schedules(config["optimizer"], config.get("knot_episodes"), 0)
         self.optimizer = torch.optim.Adam(
@@ -131,7 +135,7 @@ class TrainingSession:
             resume = resume.resolve()
             self.completed_round, replay = load_checkpoint(
                 resume, self.model, self.optimizer, config, self.catalog_hash,
-                self.placement_controller.prices,
+                self.placement_controller.prices, self.edge_controller.prices,
             )
             self.experience = {number: ExperienceRound(**data) for number, data in replay.items()}
             self.run_dir = resume.parent.parent
@@ -185,6 +189,7 @@ class TrainingSession:
                     temperature=temperature,
                     log_success_floor=settings["log_success_floor"],
                     placement_prices=self.placement_controller.prices,
+                    edge_prices=self.edge_controller.prices,
                 )
                 environments.apply_actions(actions)
                 steps.append([action if action is not None else (-1, -1, -1) for action in actions])
@@ -232,8 +237,16 @@ class TrainingSession:
             features = EnvironmentGroup.replay(self.catalog, episodes).extract_features()
             room_positions = features.room_positions.to(self.device)
             room_cells = features.room_cells.to(self.device)
-            anchor_logits, cell_logits = self.model(room_positions, room_cells)
+            anchor_logits, cell_logits, edge_logits = self.model(room_positions, room_cells)
             anchor_targets = torch.tensor(anchors, device=self.device)
+            terminal_positions = anchor_targets.masked_fill(anchor_targets == BOARD_SIZE**2, -1)
+            edge_targets, _ = self.model.edge_pairs.contacts(terminal_positions)
+            _, unresolved_edges = self.model.edge_pairs.contacts(room_positions)
+            edge_losses = F.binary_cross_entropy_with_logits(
+                edge_logits, edge_targets.to(edge_logits.dtype), reduction="none",
+            )
+            edge_loss = edge_losses.masked_fill(~unresolved_edges, 0).sum()
+            edge_loss = edge_loss * (room_positions.shape[1] / max(edge_logits.shape[1], 1))
             anchor_targets.masked_fill_(room_positions >= 0, -100)
             anchor_loss = F.cross_entropy(
                 anchor_logits.flatten(0, 1), anchor_targets.flatten(), reduction="sum",
@@ -242,7 +255,7 @@ class TrainingSession:
                 device=self.device, dtype=torch.float32,
             )
             cell_losses = F.binary_cross_entropy_with_logits(cell_logits, cell_targets, reduction="none")
-            loss = anchor_loss + cell_losses.masked_fill(room_cells >= 0, 0).sum()
+            loss = anchor_loss + cell_losses.masked_fill(room_cells >= 0, 0).sum() + edge_loss
             self.optimizer.zero_grad(set_to_none=True)
             loss.backward()
             self.optimizer.step()
@@ -270,6 +283,7 @@ class TrainingSession:
         save_checkpoint(
             path, self.model, self.optimizer, self.completed_round, self.config,
             self.catalog_hash, self.catalog.room_ids, self.experience, self.placement_controller.prices,
+            self.edge_controller.prices,
         )
         self.pending_maps.clear()
         prune_checkpoints(path.parent, self.completed_round, self.config["checkpoint_period"])
@@ -284,11 +298,15 @@ class TrainingSession:
             data = self.generate_round()
             self.experience[number] = ExperienceRound(**data)
             metrics = self.train_round(number)
-            controller_settings = instantiate_schedules(
-                self.config["placement_controller"], self.config.get("knot_episodes"),
-                number * len(data["actions"]),
-            )
-            metrics.update(self.placement_controller.update(data["actions"], **controller_settings))
+            episode_count = len(data["actions"])
+            schedule_args = (self.config.get("knot_episodes"), number * episode_count)
+            metrics.update(self.placement_controller.update(
+                data["actions"], **instantiate_schedules(self.config["placement_controller"], *schedule_args),
+            ))
+            metrics.update(self.edge_controller.update(
+                edge_pair_counts(data["actions"], self.catalog.room_sizes), episode_count,
+                **instantiate_schedules(self.config["edge_controller"], *schedule_args),
+            ))
             room_count = len(self.catalog.room_ids)
             outcomes = data["outcomes"].float()
             valid_actions = data["actions"][data["outcomes"].all(dim=1)]
@@ -302,7 +320,6 @@ class TrainingSession:
                 "cell_fill_frequency": outcomes[:, room_count:].mean(dim=0).tolist(),
                 "placement_balance": placement_balance(data["actions"], self.catalog.room_sizes),
                 "placement_balance_valid": placement_balance(valid_actions, self.catalog.room_sizes),
-                "edge_pair_balance": edge_pair_balance(data["actions"], self.catalog.room_sizes),
                 "edge_pair_balance_valid": edge_pair_balance(valid_actions, self.catalog.room_sizes),
             })
             unique_log = ""
@@ -326,13 +343,14 @@ class TrainingSession:
             self.completed_round = number
             logging.info(
                 "Round %s: complete=%.3f rooms=%.2f cells=%.2f loss=%.4f lr=%.6g "
-                "bal=%.2f (%.2f) edge=%.2f (%.2f) target=%.3f price=%.3f%s",
+                "bal=%.2f (%.2f) edge=%.2f (%.2f) target=%.3f price=%.3f edge_price=%.3f%s",
                 number,
                 metrics["complete_map_frequency"], metrics["mean_rooms_unplaced"],
                 metrics["mean_unoccupied_cells"], metrics["loss_per_prefix"], metrics["learning_rate"],
                 metrics["placement_balance"], metrics["placement_balance_valid"],
                 metrics["edge_pair_balance"], metrics["edge_pair_balance_valid"],
-                metrics["placement_target_imbalance"], metrics["placement_price_rms"], unique_log,
+                metrics["placement_target_imbalance"], metrics["placement_price_rms"],
+                metrics["edge_price_rms"], unique_log,
             )
             if number % self.config["checkpoint_period"] == 0:
                 self.save_checkpoint()

@@ -5,11 +5,15 @@ import torch
 from z3_map_gen import BOARD_SIZE
 
 
-def _collision_balance(counts, possible_partners):
+def collision_totals(counts, possible_partners):
     totals = counts.sum(dim=1)
-    possible_partners = torch.tensor(possible_partners, dtype=torch.float64)
-    expected = (totals * (totals - 1) / possible_partners).sum().item()
-    return (counts * (counts - 1)).sum().item() / expected if expected else float("nan")
+    expected = (totals * (totals - 1) / possible_partners).sum()
+    return (counts * (counts - 1)).sum(), expected
+
+
+def _collision_balance(counts, possible_partners):
+    observed, expected = collision_totals(counts, possible_partners)
+    return (observed / expected).item()
 
 
 def placement_balance(actions, room_sizes):
@@ -21,14 +25,21 @@ def placement_balance(actions, room_sizes):
     position_counts = [
         (BOARD_SIZE - width + 1) * (BOARD_SIZE - height + 1) for width, height in room_sizes
     ]
-    return _collision_balance(counts, position_counts)
+    return _collision_balance(counts, torch.tensor(position_counts, dtype=torch.float64))
 
 
-def edge_pair_balance(actions, room_sizes):
-    edges = torch.full((len(actions), 4, BOARD_SIZE, BOARD_SIZE), -1, dtype=torch.long)
+def edge_partner_counts(room_sizes):
     total_width = sum(width for width, height in room_sizes)
     total_height = sum(height for width, height in room_sizes)
     possible_partners = []
+    for width, height in room_sizes:
+        possible_partners.extend([total_width - width] * (2 * width))
+        possible_partners.extend([total_height - height] * (2 * height))
+    return torch.tensor(possible_partners, dtype=torch.float64)
+
+
+def edge_pair_counts(actions, room_sizes):
+    edges = torch.full((len(actions), 4, BOARD_SIZE, BOARD_SIZE), -1, dtype=torch.long)
     segment_count = 0
     for room, (width, height) in enumerate(room_sizes):
         episode, step = (actions[:, :, 0] == room).nonzero(as_tuple=True)
@@ -41,15 +52,17 @@ def edge_pair_balance(actions, room_sizes):
             edges[episode, 2, y + dy, x + width - 1] = segment_count + 2 * width + dy
             edges[episode, 3, y + dy, x] = segment_count + 2 * width + height + dy
         segment_count += 2 * (width + height)
-        possible_partners.extend([total_width - width] * (2 * width))
-        possible_partners.extend([total_height - height] * (2 * height))
     first = torch.cat((edges[:, 1, :-1, :].flatten(), edges[:, 2, :, :-1].flatten()))
     second = torch.cat((edges[:, 0, 1:, :].flatten(), edges[:, 3, :, 1:].flatten()))
     paired = (first >= 0) & (second >= 0)
     counts = torch.bincount(
         first[paired] * segment_count + second[paired], minlength=segment_count**2,
     ).reshape(segment_count, segment_count)
-    return _collision_balance(counts + counts.T, possible_partners)
+    return counts + counts.T
+
+
+def edge_pair_balance(actions, room_sizes):
+    return _collision_balance(edge_pair_counts(actions, room_sizes), edge_partner_counts(room_sizes))
 
 
 def map_anchors(valid_actions):
