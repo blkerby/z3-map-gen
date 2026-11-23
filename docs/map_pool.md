@@ -36,7 +36,9 @@ Input tensors are read one batch at a time. By default, memory is bounded by the
 
 Use `--balance --candidate-count 300000` to consider up to 300,000 distinct layouts for the export. Set `--candidate-count` at least as high as `--count`. If fewer candidates are available, the exporter can still proceed as long as it can fill the pool. Memory and optimization time scale with the number of candidates.
 
-Balanced export optimizes layout inclusion probabilities against the placement target, then uses randomized rounding to draw the requested number of distinct layouts. It keeps the newest-first pool if the draw fails to lower the measured `target`. The output path and overwrite rules are the same for both modes.
+With `--balance`, use `--edge-weight 1` to give a one-point change in edge imbalance the same weight as a one-point change in placement target imbalance. The default weight of zero balances room placements. The exporter minimizes the weighted sum of the reported `target` and `edge` metrics.
+
+Balanced export optimizes layout inclusion probabilities, then uses randomized rounding to draw the requested number of distinct layouts. It keeps the newest-first pool if the draw fails to lower the weighted objective. The output path and overwrite rules are the same for both modes.
 
 The exporter prints placement balance (`bal`), edge-pair balance (`edge`), and placement target imbalance (`target`) over the exported layouts. To print the same stats for an existing pool, run:
 

@@ -38,7 +38,7 @@ def edge_partner_counts(room_sizes):
     return torch.tensor(possible_partners, dtype=torch.float64)
 
 
-def edge_pair_counts(actions, room_sizes):
+def facing_segments(actions, room_sizes):
     edges = torch.full((len(actions), 4, BOARD_SIZE, BOARD_SIZE), -1, dtype=torch.long)
     segment_count = 0
     for room, (width, height) in enumerate(room_sizes):
@@ -52,8 +52,13 @@ def edge_pair_counts(actions, room_sizes):
             edges[episode, 2, y + dy, x + width - 1] = segment_count + 2 * width + dy
             edges[episode, 3, y + dy, x] = segment_count + 2 * width + height + dy
         segment_count += 2 * (width + height)
-    first = torch.cat((edges[:, 1, :-1, :].flatten(), edges[:, 2, :, :-1].flatten()))
-    second = torch.cat((edges[:, 0, 1:, :].flatten(), edges[:, 3, :, 1:].flatten()))
+    first = torch.cat((edges[:, 1, :-1, :].flatten(1), edges[:, 2, :, :-1].flatten(1)), dim=1)
+    second = torch.cat((edges[:, 0, 1:, :].flatten(1), edges[:, 3, :, 1:].flatten(1)), dim=1)
+    return first, second, segment_count
+
+
+def edge_pair_counts(actions, room_sizes):
+    first, second, segment_count = facing_segments(actions, room_sizes)
     paired = (first >= 0) & (second >= 0)
     counts = torch.bincount(
         first[paired] * segment_count + second[paired], minlength=segment_count**2,
