@@ -6,36 +6,35 @@ from z3_map_gen import BOARD_SIZE, CandidateFeatures, EnvironmentGroup
 
 
 CELL_FAILED = -1
-NUM_ROOMS = 40
 
 @torch.no_grad()
 def score_candidates(
     model: OutcomeModel,
     candidates: CandidateFeatures,
     log_success_floor: float,
+    placement_prices: torch.Tensor,
 ) -> torch.Tensor:
-    """Score actual candidates using a finite negative log-success floor."""
+    """Score candidate completion and expected subsequent placement costs."""
     device = model.room_embedding.weight.device
     if candidates.environment_offsets[-1] == 0:
         return torch.empty(0, device=device)
     features = candidates.features
     room_positions = features.room_positions.to(device)
     room_cells = features.room_cells.to(device)
-    return _score_features(model, room_positions, room_cells, log_success_floor)
+    return _score_features(model, room_positions, room_cells, log_success_floor, placement_prices)
 
 
 @torch.compile(dynamic=True)
-def _score_features(model, room_positions, room_cells, log_success_floor):
-    n = room_positions.shape[0]
-    failed_cells = room_cells == CELL_FAILED
-    failed_position = torch.zeros([n, NUM_ROOMS], dtype=torch.bool, device=room_positions.device)
-    failed = torch.cat([failed_position, failed_cells], dim=-1)
-    successful = torch.cat((room_positions >= 0, room_cells >= 0), dim=-1)
-    logits = model(room_positions, room_cells)
-    log_success = F.logsigmoid(logits).clamp_min(log_success_floor)
-    log_success = log_success.masked_fill(failed, log_success_floor)
-    log_success = log_success.masked_fill(successful, 0)
-    return log_success.sum(dim=-1)
+def _score_features(model, room_positions, room_cells, log_success_floor, placement_prices):
+    anchor_logits, cell_logits = model(room_positions, room_cells)
+    anchor_log_probs = F.log_softmax(anchor_logits, dim=-1)[..., :-1]
+    room_log_success = anchor_log_probs.logsumexp(dim=-1).clamp_min(log_success_floor)
+    future_prices = (anchor_log_probs.exp() * placement_prices).sum(dim=-1)
+    room_scores = (room_log_success - future_prices).masked_fill(room_positions >= 0, 0)
+    cell_scores = F.logsigmoid(cell_logits).clamp_min(log_success_floor)
+    cell_scores = cell_scores.masked_fill(room_cells == CELL_FAILED, log_success_floor)
+    cell_scores = cell_scores.masked_fill(room_cells >= 0, 0)
+    return room_scores.sum(dim=-1) + cell_scores.sum(dim=-1)
 
 
 @torch.no_grad()
@@ -54,7 +53,7 @@ def sample_actions(
     environment_count = len(offsets) - 1
     if not actions:
         return [None] * environment_count
-    scores = score_candidates(model, candidates, log_success_floor)
+    scores = score_candidates(model, candidates, log_success_floor, placement_prices)
     placements = torch.tensor(actions, device=scores.device)
     scores -= placement_prices[placements[:, 0], placements[:, 2] * BOARD_SIZE + placements[:, 1]]
     counts = [end - start for start, end in zip(offsets[:-1], offsets[1:])]

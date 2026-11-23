@@ -222,19 +222,27 @@ class TrainingSession:
         for _ in range(settings["batches_per_round"]):
             episodes = []
             labels = []
+            anchors = []
             for _ in range(settings["batch_size"]):
                 number = random.choice(replay_rounds)
-                actions, outcomes = self.experience[number].sample_state()
+                actions, outcomes, terminal_anchors = self.experience[number].sample_state()
                 episodes.append(actions)
                 labels.append(outcomes)
+                anchors.append(terminal_anchors)
             features = EnvironmentGroup.replay(self.catalog, episodes).extract_features()
             room_positions = features.room_positions.to(self.device)
             room_cells = features.room_cells.to(self.device)
-            targets = torch.stack(labels).to(device=self.device, dtype=torch.float32)
-            unresolved = torch.cat((room_positions < 0, room_cells < 0), dim=1)
-            logits = self.model(room_positions, room_cells)
-            losses = F.binary_cross_entropy_with_logits(logits, targets, reduction="none")
-            loss = losses.masked_fill(~unresolved, 0).sum()
+            anchor_logits, cell_logits = self.model(room_positions, room_cells)
+            anchor_targets = torch.tensor(anchors, device=self.device)
+            anchor_targets.masked_fill_(room_positions >= 0, -100)
+            anchor_loss = F.cross_entropy(
+                anchor_logits.flatten(0, 1), anchor_targets.flatten(), reduction="sum",
+            )
+            cell_targets = torch.stack(labels)[:, room_positions.shape[1]:].to(
+                device=self.device, dtype=torch.float32,
+            )
+            cell_losses = F.binary_cross_entropy_with_logits(cell_logits, cell_targets, reduction="none")
+            loss = anchor_loss + cell_losses.masked_fill(room_cells >= 0, 0).sum()
             self.optimizer.zero_grad(set_to_none=True)
             loss.backward()
             self.optimizer.step()

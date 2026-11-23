@@ -72,5 +72,11 @@ class ExperienceRound:
         episode = bisect.bisect_right(self.cumulative_lengths, index)
         start = self.cumulative_lengths[episode - 1] if episode else 0
         length = index - start + 1
-        actions = self.tensors["actions"][episode, :length].tolist()
-        return [tuple(action) for action in actions], self.tensors["outcomes"][episode]
+        episode_length = self.tensors["lengths"][episode]
+        actions = self.tensors["actions"][episode, :episode_length].tolist()
+        outcomes = self.tensors["outcomes"][episode]
+        cell_count = BOARD_SIZE**2
+        anchors = [cell_count] * (outcomes.numel() - cell_count)
+        for room, x, y in actions:
+            anchors[room] = y * BOARD_SIZE + x
+        return [tuple(action) for action in actions[:length]], outcomes, anchors
