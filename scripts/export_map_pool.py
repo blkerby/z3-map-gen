@@ -53,14 +53,14 @@ def select_balanced_layouts(anchors, count, room_sizes, edge_weight=0.0):
     indices = torch.arange(EPISODE_LENGTH) * BOARD_SIZE**2 + anchors
     baseline_counts = torch.bincount(indices[:count].flatten(), minlength=target.numel())
     expected_counts = baseline_counts.double()
+    placement_normalizer = count * (count - 1) * len(room_sizes)
+    inverse_partners = edge_partner_counts(room_sizes).reciprocal()
+    edge_bins = inverse_partners.numel()**2
     if edge_weight:
         scale = max(1.0, edge_weight)
-        placement_normalizer = count * (count - 1) * len(room_sizes)
         inverse_target /= placement_normalizer
         inverse_target /= scale
         edge_weight /= scale
-        inverse_partners = edge_partner_counts(room_sizes).reciprocal()
-        edge_bins = inverse_partners.numel()**2
         edge_indices = layout_edge_indices(anchors, room_sizes)
         baseline_edges = torch.bincount(edge_indices[:count].flatten(), minlength=edge_bins).double()
         expected_edges = baseline_edges
@@ -109,6 +109,17 @@ def select_balanced_layouts(anchors, count, room_sizes, edge_weight=0.0):
         expected_counts.add_(change, alpha=step)
         probabilities.mul_(1 - step)
         probabilities[chosen] += step
+
+    if not edge_weight:
+        expected_edges = torch.zeros(edge_bins, dtype=torch.float64)
+        for chunk, weights in zip(anchors.split(4096), probabilities.split(4096)):
+            contacts = layout_edge_indices(chunk, room_sizes)
+            expected_edges += torch.bincount(
+                contacts.flatten(), weights=weights.repeat_interleave(contacts.size(1)), minlength=edge_bins,
+            )
+    estimated_edge = edge_balance_terms(expected_edges, inverse_partners)[0]
+    estimated_target = (expected_counts * (expected_counts - 1) / denominator).sum() / placement_normalizer
+    print(f"Before sampling (from expected counts): edge={estimated_edge:.3f} target={estimated_target:.4f}", flush=True)
 
     # A random shift of the integer grid hits each interval with probability equal to its length.
     order = torch.randperm(len(anchors))
