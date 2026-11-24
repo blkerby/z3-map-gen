@@ -176,6 +176,7 @@ def main():
     torch.set_num_threads(1)
     seen = set()
     sample = []
+    original_count = 0
     catalog_hash = None
     room_ids = None
     for index in range(start_index, -1, -1):
@@ -208,19 +209,21 @@ def main():
 
         last_round = min(ending_round, number) - previous_round
         for offset in range(last_round, 0, -1):
-            layouts = {bytes(row) for row in anchors[offsets[offset - 1]:offsets[offset]].tolist()}
-            for layout in sorted(layouts):
-                if layout in seen:
-                    continue
-                seen.add(layout)
-                sample.append(layout)
-                if len(sample) == candidate_count:
-                    break
+            start, end = offsets[offset - 1], offsets[offset]
+            original_count += end - start
+            layouts = {bytes(row) for row in anchors[start:end].tolist()}
+            layouts.difference_update(seen)
+            seen.update(layouts)
+            sample.extend(sorted(layouts)[:candidate_count - len(sample)])
             if len(sample) == candidate_count:
                 break
         files_read = start_index - index + 1
         if files_read % 1000 == 0 or index == 0 or len(sample) == candidate_count:
-            print(f"{files_read}/{start_index + 1} files: {len(seen)} distinct successful maps", flush=True)
+            print(
+                f"{files_read}/{start_index + 1} files: {original_count} successful maps before deduplication, "
+                f"{len(seen)} distinct successful maps across scanned rounds",
+                flush=True,
+            )
         if len(sample) == candidate_count:
             break
 
