@@ -41,6 +41,11 @@ impl PyCatalog {
         self.inner.segment_matches.clone()
     }
 
+    #[getter]
+    fn segment_closed(&self) -> Vec<bool> {
+        self.inner.segment_closed.clone()
+    }
+
     #[getter(room_cell_count)]
     fn get_room_cell_count(&self) -> i8 {
         let mut count = 0;

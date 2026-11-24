@@ -10,7 +10,8 @@ import sys
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
-from experience import edge_pair_balance, placement_balance
+from edges import EdgePairs
+from experience import edge_pair_counts, placement_balance
 from placement import PlacementController
 from z3_map_gen import BOARD_SIZE, EPISODE_LENGTH, Catalog
 
@@ -36,13 +37,13 @@ def validate_pool_anchors(anchors, room_sizes):
         raise ValueError("Map pool contains a room placement outside the board")
 
 
-def format_layout_stats(anchors, room_sizes):
+def format_layout_stats(anchors, room_sizes, edge_pairs):
     x, y = anchors % BOARD_SIZE, anchors // BOARD_SIZE
     rooms = torch.arange(EPISODE_LENGTH).expand_as(anchors)
     actions = torch.stack((rooms, x, y), dim=-1)
 
     bal = placement_balance(actions, room_sizes)
-    edge = edge_pair_balance(actions, room_sizes)
+    edge = edge_pairs.balance(edge_pair_counts(actions, room_sizes, edge_pairs.edge_bins), len(actions))
     controller = PlacementController(room_sizes, "cpu")
     target = controller.update(actions, gain=0, leak=1)["placement_target_imbalance"]
     return f"bal={bal:.3f} edge={edge:.3f} target={target:.4f}"
@@ -57,7 +58,7 @@ def format_pool_stats(pool, room_data):
     catalog = load_pool_catalog(room_data, catalog_hash, room_ids)
     anchors = torch.frombuffer(pool, dtype=torch.uint8, offset=POOL_HEADER.size).reshape(count, EPISODE_LENGTH)
     validate_pool_anchors(anchors, catalog.room_sizes)
-    return format_layout_stats(anchors, catalog.room_sizes)
+    return format_layout_stats(anchors, catalog.room_sizes, EdgePairs(catalog))
 
 
 def main():

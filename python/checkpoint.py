@@ -51,7 +51,8 @@ def save_tensors(path: Path, tensors: dict, metadata: dict):
 
 
 def save_checkpoint(
-    path, model, optimizer, completed_round, config, catalog_hash, room_ids, replay, placement_prices, edge_prices,
+    path, model, optimizer, completed_round, config, catalog_hash, room_ids, replay,
+    placement_prices, edge_prices, wall_prices,
 ):
     tensors = {}
     for name, tensor in model.state_dict().items():
@@ -63,6 +64,7 @@ def save_checkpoint(
     tensors["rng.cpu"] = torch.get_rng_state()
     tensors["placement_prices"] = placement_prices
     tensors["edge_prices"] = edge_prices
+    tensors["wall_prices"] = wall_prices
     for number, experience in replay.items():
         for name, tensor in experience.tensors.items():
             tensors[f"replay.{number}.{name}"] = tensor
@@ -81,7 +83,7 @@ def save_checkpoint(
     save_tensors(path, tensors, metadata)
 
 
-def load_checkpoint(path, model, optimizer, config, catalog_hash, placement_prices, edge_prices):
+def load_checkpoint(path, model, optimizer, config, catalog_hash, placement_prices, edge_prices, wall_prices):
     with safe_open(path, framework="pt", device="cpu") as file:
         metadata = file.metadata()
         completed_round = int(metadata["completed_round"])
@@ -91,8 +93,8 @@ def load_checkpoint(path, model, optimizer, config, catalog_hash, placement_pric
             raise ValueError(f"Checkpoint catalog does not match: {path}")
         if "replay_rounds" not in metadata:
             raise ValueError(f"Checkpoint does not contain replay: {path}")
-        if "edge_prices" not in file.keys():
-            raise ValueError(f"Edge prediction requires a fresh run: {path}")
+        if "edge_prices" not in file.keys() or "wall_prices" not in file.keys():
+            raise ValueError(f"Checkpoint lacks edge prices for wall-slot balance: {path}")
         replay = {
             number: {
                 name: file.get_tensor(f"replay.{number}.{name}")
@@ -111,6 +113,7 @@ def load_checkpoint(path, model, optimizer, config, catalog_hash, placement_pric
         model.load_state_dict(model_state)
         placement_prices.copy_(file.get_tensor("placement_prices"))
         edge_prices.copy_(file.get_tensor("edge_prices"))
+        wall_prices.copy_(file.get_tensor("wall_prices"))
         optimizer.load_state_dict({
             "state": optimizer_state,
             "param_groups": json.loads(metadata["optimizer_param_groups"]),

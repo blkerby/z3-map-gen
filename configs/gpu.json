@@ -23,11 +23,11 @@
     "log_success_floor": -50.0
   },
   "placement_controller": {
-    "gain": {"log": [0.2, 0.005]},
+    "gain": {"log": [0.05, 0.001]},
     "leak": {"log": [0.02, 0.005]}
   },
   "edge_controller": {
-    "gain": {"log": [0.2, 0.005]},
+    "gain": {"log": [0.1, 0.002]},
     "leak": {"log": [0.02, 0.005]}
   },
   "train": {

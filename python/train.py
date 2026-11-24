@@ -18,7 +18,7 @@ from torch.nn import functional as F
 
 from checkpoint import load_checkpoint, prune_checkpoints, round_files, save_checkpoint, save_tensors
 from edges import EdgeController
-from experience import ExperienceRound, edge_pair_balance, edge_pair_counts, map_anchors, placement_balance
+from experience import ExperienceRound, edge_pair_counts, map_anchors, placement_balance
 from generation import sample_actions
 from model import OutcomeModel
 from placement import PlacementController
@@ -113,7 +113,7 @@ class TrainingSession:
         random.seed(config["seed"])
         torch.manual_seed(config["seed"])
         self.model = OutcomeModel(self.catalog, **config["model"]).to(self.device)
-        self.edge_controller = EdgeController(self.model.edge_pairs, self.catalog.room_sizes, self.device)
+        self.edge_controller = EdgeController(self.model.edge_pairs, self.device)
         self.model.compile(dynamic=True)
         settings = instantiate_schedules(config["optimizer"], config.get("knot_episodes"), 0)
         self.optimizer = torch.optim.Adam(
@@ -135,7 +135,7 @@ class TrainingSession:
             resume = resume.resolve()
             self.completed_round, replay = load_checkpoint(
                 resume, self.model, self.optimizer, config, self.catalog_hash,
-                self.placement_controller.prices, self.edge_controller.prices,
+                self.placement_controller.prices, self.edge_controller.prices, self.edge_controller.wall_prices,
             )
             self.experience = {number: ExperienceRound(**data) for number, data in replay.items()}
             self.run_dir = resume.parent.parent
@@ -180,6 +180,8 @@ class TrainingSession:
         )
         action_batches = []
         outcome_batches = []
+        # A room's anchor determines all of its wall contacts.
+        anchor_prices = self.placement_controller.prices + self.edge_controller.wall_anchor_prices()
         for _ in range(settings["batches_per_round"]):
             environments = EnvironmentGroup(self.catalog, settings["environment_count"])
             steps = []
@@ -188,7 +190,7 @@ class TrainingSession:
                     environments, self.model,
                     temperature=temperature,
                     log_success_floor=settings["log_success_floor"],
-                    placement_prices=self.placement_controller.prices,
+                    placement_prices=anchor_prices,
                     edge_prices=self.edge_controller.prices,
                 )
                 environments.apply_actions(actions)
@@ -283,7 +285,7 @@ class TrainingSession:
         save_checkpoint(
             path, self.model, self.optimizer, self.completed_round, self.config,
             self.catalog_hash, self.catalog.room_ids, self.experience, self.placement_controller.prices,
-            self.edge_controller.prices,
+            self.edge_controller.prices, self.edge_controller.wall_prices,
         )
         self.pending_maps.clear()
         prune_checkpoints(path.parent, self.completed_round, self.config["checkpoint_period"])
@@ -292,6 +294,8 @@ class TrainingSession:
     def run(self):
         last_saved_round = self.completed_round if self.completed_round else None
         torch.set_float32_matmul_precision('high')
+        room_sizes = self.catalog.room_sizes
+        edge_pairs = self.model.edge_pairs
         for number in range(self.completed_round + 1, self.config["rounds"] + 1):
             if self.stop_requested:
                 break
@@ -303,13 +307,14 @@ class TrainingSession:
             metrics.update(self.placement_controller.update(
                 data["actions"], **instantiate_schedules(self.config["placement_controller"], *schedule_args),
             ))
-            metrics.update(self.edge_controller.update(
-                edge_pair_counts(data["actions"], self.catalog.room_sizes), episode_count,
-                **instantiate_schedules(self.config["edge_controller"], *schedule_args),
-            ))
             room_count = len(self.catalog.room_ids)
             outcomes = data["outcomes"].float()
             valid_actions = data["actions"][data["outcomes"].all(dim=1)]
+            metrics.update(self.edge_controller.update(
+                edge_pair_counts(data["actions"], room_sizes, edge_pairs.edge_bins, complete=False),
+                episode_count, **instantiate_schedules(self.config["edge_controller"], *schedule_args),
+            ))
+            valid_edge_counts = edge_pair_counts(valid_actions, room_sizes, edge_pairs.edge_bins)
             anchors = map_anchors(valid_actions)
             metrics.update({
                 "round": number,
@@ -318,9 +323,9 @@ class TrainingSession:
                 "mean_unoccupied_cells": (1.0 - outcomes[:, room_count:]).sum(dim=1).mean().item(),
                 "room_placement_frequency": outcomes[:, :room_count].mean(dim=0).tolist(),
                 "cell_fill_frequency": outcomes[:, room_count:].mean(dim=0).tolist(),
-                "placement_balance": placement_balance(data["actions"], self.catalog.room_sizes),
-                "placement_balance_valid": placement_balance(valid_actions, self.catalog.room_sizes),
-                "edge_pair_balance_valid": edge_pair_balance(valid_actions, self.catalog.room_sizes),
+                "placement_balance": placement_balance(data["actions"], room_sizes),
+                "placement_balance_valid": placement_balance(valid_actions, room_sizes),
+                "edge_pair_balance_valid": edge_pairs.balance(valid_edge_counts, len(valid_actions)),
             })
             unique_log = ""
             if self.log_unique_maps:

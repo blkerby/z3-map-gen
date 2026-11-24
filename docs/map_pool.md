@@ -40,7 +40,13 @@ With `--balance`, use `--edge-weight 1` to give a one-point change in edge imbal
 
 Balanced export optimizes layout inclusion probabilities, then uses randomized rounding to draw the requested number of distinct layouts. It keeps the newest-first pool if the draw fails to lower the weighted objective. The output path and overwrite rules are the same for both modes.
 
-The exporter prints placement balance (`bal`), edge-pair balance (`edge`), and placement target imbalance (`target`) over the exported layouts. To print the same stats for an existing pool, run:
+Use `--iterations` with `--balance` to set the maximum number of optimization iterations. The default is 100.
+
+The exporter prints placement balance (`bal`), edge-pair balance (`edge`), and placement target imbalance (`target`) over the exported layouts. Edge balance counts repeated contacts between room segments and between a segment and a specific slot along a board wall. The uniform baseline counts all opposite-facing segments on other rooms as interior candidates and includes eligible wall slots. Each complete map contributes one partner per room segment and wall slot, so the baseline depends only on the catalog and pool size.
+
+Training updates edge prices from formed contacts in all episodes, including partial maps. Its `edge_pair_balance` metric uses observed endpoint totals to account for missing contacts. It also reports `edge_pair_balance_valid` over complete maps, which is undefined with fewer than two complete maps.
+
+To print the same stats for an existing pool, run:
 
 ```sh
 python scripts/compute_pool_stats.py path/to/map_pool.bin

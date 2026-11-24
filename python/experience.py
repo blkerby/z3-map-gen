@@ -28,17 +28,7 @@ def placement_balance(actions, room_sizes):
     return _collision_balance(counts, torch.tensor(position_counts, dtype=torch.float64))
 
 
-def edge_partner_counts(room_sizes):
-    total_width = sum(width for width, height in room_sizes)
-    total_height = sum(height for width, height in room_sizes)
-    possible_partners = []
-    for width, height in room_sizes:
-        possible_partners.extend([total_width - width] * (2 * width))
-        possible_partners.extend([total_height - height] * (2 * height))
-    return torch.tensor(possible_partners, dtype=torch.float64)
-
-
-def facing_segments(actions, room_sizes):
+def edge_contact_indices(actions, room_sizes, *, complete=True):
     edges = torch.full((len(actions), 4, BOARD_SIZE, BOARD_SIZE), -1, dtype=torch.long)
     segment_count = 0
     for room, (width, height) in enumerate(room_sizes):
@@ -52,22 +42,26 @@ def facing_segments(actions, room_sizes):
             edges[episode, 2, y + dy, x + width - 1] = segment_count + 2 * width + dy
             edges[episode, 3, y + dy, x] = segment_count + 2 * width + height + dy
         segment_count += 2 * (width + height)
-    first = torch.cat((edges[:, 1, :-1, :].flatten(1), edges[:, 2, :, :-1].flatten(1)), dim=1)
-    second = torch.cat((edges[:, 0, 1:, :].flatten(1), edges[:, 3, :, 1:].flatten(1)), dim=1)
-    return first, second, segment_count
-
-
-def edge_pair_counts(actions, room_sizes):
-    first, second, segment_count = facing_segments(actions, room_sizes)
+    wall = torch.stack((edges[:, 0, 0, :], edges[:, 1, -1, :], edges[:, 2, :, -1], edges[:, 3, :, 0]), dim=1)
+    wall_ids = torch.arange(segment_count, segment_count + 4 * BOARD_SIZE).expand(len(actions), -1)
+    first = torch.cat((edges[:, 1, :-1, :].flatten(1), edges[:, 2, :, :-1].flatten(1), wall.flatten(1)), dim=1)
+    second = torch.cat((edges[:, 0, 1:, :].flatten(1), edges[:, 3, :, 1:].flatten(1), wall_ids), dim=1)
     paired = (first >= 0) & (second >= 0)
-    counts = torch.bincount(
-        first[paired] * segment_count + second[paired], minlength=segment_count**2,
-    ).reshape(segment_count, segment_count)
-    return counts + counts.T
+    indices = first[paired] * (segment_count + 4 * BOARD_SIZE) + second[paired]
+    if not complete:
+        return indices
+    contact_count = segment_count // 2 + 2 * BOARD_SIZE
+    if not (paired.sum(dim=1) == contact_count).all():
+        raise ValueError("Edge balancing requires complete room layouts")
+    return indices.reshape(len(actions), contact_count)
 
 
-def edge_pair_balance(actions, room_sizes):
-    return _collision_balance(edge_pair_counts(actions, room_sizes), edge_partner_counts(room_sizes))
+def edge_pair_counts(actions, room_sizes, edge_bins, *, complete=True):
+    counts = torch.zeros(edge_bins, dtype=torch.long)
+    for chunk in actions.split(4096):
+        indices = edge_contact_indices(chunk, room_sizes, complete=complete)
+        counts += torch.bincount(indices.flatten(), minlength=edge_bins)
+    return counts
 
 
 def map_anchors(valid_actions):

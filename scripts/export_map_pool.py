@@ -4,6 +4,7 @@
 import argparse
 from bisect import bisect_left
 import json
+import logging
 import math
 from pathlib import Path
 import sys
@@ -16,37 +17,28 @@ from compute_pool_stats import DEFAULT_ROOM_DATA, POOL_HEADER, format_layout_sta
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 from checkpoint import round_files
-from experience import edge_partner_counts, facing_segments
+from edges import EdgePairs
+from experience import edge_contact_indices
 from placement import PlacementController
 from z3_map_gen import BOARD_SIZE, EPISODE_LENGTH
 
 
+logger = logging.getLogger(__name__)
+DEFAULT_ITERATIONS = 100
+
+
 def layout_edge_indices(anchors, room_sizes):
-    contacts_per_map = sum(width + height for width, height in room_sizes) - 2 * BOARD_SIZE
+    contacts_per_map = sum(width + height for width, height in room_sizes) + 2 * BOARD_SIZE
     indices = torch.empty((len(anchors), contacts_per_map), dtype=torch.int32)
     for start in range(0, len(anchors), 4096):
         chunk = anchors[start:start + 4096]
         rooms = torch.arange(len(room_sizes)).expand_as(chunk)
         actions = torch.stack((rooms, chunk % BOARD_SIZE, chunk // BOARD_SIZE), dim=-1)
-        first, second, segment_count = facing_segments(actions, room_sizes)
-        paired = (first >= 0) & (second >= 0)
-        if not (paired.sum(dim=1) == contacts_per_map).all():
-            raise ValueError("Edge balancing requires complete room layouts")
-        indices[start:start + len(chunk)] = (
-            first[paired] * segment_count + second[paired]
-        ).reshape_as(indices[start:start + len(chunk)])
+        indices[start:start + len(chunk)] = edge_contact_indices(actions, room_sizes)
     return indices
 
 
-def edge_balance_terms(counts, inverse_partners):
-    matrix = counts.reshape(inverse_partners.numel(), -1)
-    endpoints = matrix.sum(dim=0) + matrix.sum(dim=1)
-    expected = (endpoints * (endpoints - 1)).dot(inverse_partners)
-    observed = 2 * counts.dot(counts - 1)
-    return observed / expected, expected, endpoints
-
-
-def select_balanced_layouts(anchors, count, room_sizes, edge_weight=0.0):
+def select_balanced_layouts(anchors, count, room_sizes, edge_pairs, edge_weight=0.0, *, iterations=DEFAULT_ITERATIONS):
     target = PlacementController(room_sizes, "cpu").target.flatten()
     denominator = target.masked_fill(target == 0, float("inf"))
     inverse_target = denominator.double().reciprocal()
@@ -54,72 +46,50 @@ def select_balanced_layouts(anchors, count, room_sizes, edge_weight=0.0):
     baseline_counts = torch.bincount(indices[:count].flatten(), minlength=target.numel())
     expected_counts = baseline_counts.double()
     placement_normalizer = count * (count - 1) * len(room_sizes)
-    inverse_partners = edge_partner_counts(room_sizes).reciprocal()
-    edge_bins = inverse_partners.numel()**2
+    scale = max(1.0, edge_weight)
+    inverse_target /= placement_normalizer
+    inverse_target /= scale
+    edge_bins = edge_pairs.edge_bins
+    edge_indices = layout_edge_indices(anchors, room_sizes)
+    baseline_edges = torch.bincount(edge_indices[:count].flatten(), minlength=edge_bins).double()
+    expected_edges = baseline_edges
     if edge_weight:
-        scale = max(1.0, edge_weight)
-        inverse_target /= placement_normalizer
-        inverse_target /= scale
         edge_weight /= scale
-        edge_indices = layout_edge_indices(anchors, room_sizes)
-        baseline_edges = torch.bincount(edge_indices[:count].flatten(), minlength=edge_bins).double()
-        expected_edges = baseline_edges
+        edge_coefficient = edge_weight / edge_pairs.collision_normalizer(count)
     probabilities = torch.zeros(len(anchors), dtype=torch.float64)
     probabilities[:count] = 1
 
     # Frank-Wolfe uses the lowest-scoring subset as the next search direction.
-    # shortcut: 50 iterations cap export cost, revisit if larger pools still improve substantially at the cap.
-    for _ in range(50):
+    for iteration in range(1, iterations + 1):
         gradient = (2 * expected_counts - 1) * inverse_target
         scores = gradient[indices].sum(dim=1)
         if edge_weight:
-            balance, expected, endpoints = edge_balance_terms(expected_edges, inverse_partners)
-            endpoint_gradient = (2 * endpoints - 1) * inverse_partners
-            denominator_gradient = (endpoint_gradient[:, None] + endpoint_gradient).flatten()
-            edge_gradient = (2 * (2 * expected_edges - 1) - balance * denominator_gradient) / expected
-            scores += edge_weight * edge_gradient[edge_indices].sum(dim=1)
+            edge_gradient = (2 * expected_edges - 1) * edge_coefficient
+            scores += edge_gradient.index_select(0, edge_indices.flatten()).view_as(edge_indices).sum(dim=1)
         chosen = scores.topk(count, largest=False, sorted=False).indices
         chosen_counts = torch.bincount(indices[chosen].flatten(), minlength=target.numel())
         change = chosen_counts - expected_counts
         slope = gradient.dot(change).item()
         curvature = change.square().dot(inverse_target).item()
+        chosen_edges = torch.bincount(edge_indices[chosen].flatten(), minlength=edge_bins)
+        edge_change = chosen_edges - expected_edges
         if edge_weight:
-            chosen_edges = torch.bincount(edge_indices[chosen].flatten(), minlength=edge_bins)
-            edge_change = chosen_edges - expected_edges
-            total_slope = slope + edge_weight * edge_gradient.dot(edge_change).item()
-        else:
-            total_slope = slope
-        if total_slope >= 0:
-            break
-        if edge_weight:
-            # The edge metric is a ratio of quadratics, so check the actual objective along the step.
-            step = 1.0
-            for _ in range(24):
-                next_edges = expected_edges + step * edge_change
-                next_balance, _, _ = edge_balance_terms(next_edges, inverse_partners)
-                objective_change = step * (slope + step * curvature) + edge_weight * (next_balance - balance).item()
-                if objective_change <= 1e-4 * step * total_slope:
-                    break
-                step *= 0.5
-            else:
-                break
-            expected_edges = next_edges
-        else:
+            slope += edge_gradient.dot(edge_change).item()
+            curvature += edge_coefficient * edge_change.square().sum().item()
+        if slope < 0:
             step = min(1.0, -slope / (2 * curvature))
-        expected_counts.add_(change, alpha=step)
-        probabilities.mul_(1 - step)
-        probabilities[chosen] += step
-
-    if not edge_weight:
-        expected_edges = torch.zeros(edge_bins, dtype=torch.float64)
-        for chunk, weights in zip(anchors.split(4096), probabilities.split(4096)):
-            contacts = layout_edge_indices(chunk, room_sizes)
-            expected_edges += torch.bincount(
-                contacts.flatten(), weights=weights.repeat_interleave(contacts.size(1)), minlength=edge_bins,
-            )
-    estimated_edge = edge_balance_terms(expected_edges, inverse_partners)[0]
-    estimated_target = (expected_counts * (expected_counts - 1) / denominator).sum() / placement_normalizer
-    print(f"Before sampling (from expected counts): edge={estimated_edge:.3f} target={estimated_target:.4f}", flush=True)
+            expected_edges = expected_edges + step * edge_change
+            expected_counts.add_(change, alpha=step)
+            probabilities.mul_(1 - step)
+            probabilities[chosen] += step
+        estimated_edge = edge_pairs.balance(expected_edges, count)
+        estimated_target = (expected_counts * (expected_counts - 1) / denominator).sum() / placement_normalizer
+        logger.info(
+            "Iteration %d (from expected counts): edge=%.3f target=%.4f",
+            iteration, estimated_edge, estimated_target,
+        )
+        if slope >= 0:
+            break
 
     # A random shift of the integer grid hits each interval with probability equal to its length.
     order = torch.randperm(len(anchors))
@@ -129,27 +99,27 @@ def select_balanced_layouts(anchors, count, room_sizes, edge_weight=0.0):
     selected = order[thresholds.diff(prepend=thresholds.new_zeros(1)) > 0]
     if len(selected) == count:
         rounded_counts = torch.bincount(indices[selected].flatten(), minlength=target.numel())
-        rounded_score = (rounded_counts * (rounded_counts - 1) / denominator).sum()
-        baseline_score = (baseline_counts * (baseline_counts - 1) / denominator).sum()
+        rounded_score = (rounded_counts.double() * (rounded_counts - 1)).dot(inverse_target)
+        baseline_score = (baseline_counts.double() * (baseline_counts - 1)).dot(inverse_target)
         if edge_weight:
-            rounded_edges = torch.bincount(edge_indices[selected].flatten(), minlength=edge_bins).double()
-            rounded_score = rounded_score / placement_normalizer / scale + edge_weight * edge_balance_terms(
-                rounded_edges, inverse_partners,
-            )[0]
-            baseline_score = baseline_score / placement_normalizer / scale + edge_weight * edge_balance_terms(
-                baseline_edges, inverse_partners,
-            )[0]
+            rounded_edges = torch.bincount(edge_indices[selected].flatten(), minlength=edge_bins)
+            rounded_score += edge_weight * edge_pairs.balance(rounded_edges, count)
+            baseline_score += edge_weight * edge_pairs.balance(baseline_edges, count)
         if rounded_score < baseline_score:
             return selected.tolist()
     return range(count)
 
 
 def main():
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", stream=sys.stdout)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run", type=Path, help="Training run directory containing checkpoints and successful_maps")
     parser.add_argument("--count", type=int, default=100_000, help="Number of maps (default: 100000)")
     parser.add_argument("--balance", action="store_true", help="Select a pool with lower weighted imbalance")
     parser.add_argument("--candidate-count", type=int, help="Maximum distinct layouts to consider with --balance")
+    parser.add_argument(
+        "--iterations", type=int, help=f"Maximum optimization iterations with --balance (default: {DEFAULT_ITERATIONS})",
+    )
     parser.add_argument(
         "--edge-weight", type=float,
         help="Weight of edge imbalance relative to placement target imbalance (default: 0)",
@@ -164,6 +134,11 @@ def main():
         parser.error("--balance requires --candidate-count at least as large as --count")
     if not args.balance and args.candidate_count is not None:
         parser.error("--candidate-count requires --balance")
+    if args.iterations is not None:
+        if not args.balance:
+            parser.error("--iterations requires --balance")
+        if args.iterations < 1:
+            parser.error("--iterations must be positive")
     if args.edge_weight is not None:
         if not args.balance:
             parser.error("--edge-weight requires --balance")
@@ -230,10 +205,9 @@ def main():
                 break
         files_read = start_index - index + 1
         if files_read % 1000 == 0 or index == 0 or len(sample) == candidate_count:
-            print(
-                f"{files_read}/{start_index + 1} files: {original_count} successful maps before deduplication, "
-                f"{len(seen)} distinct successful maps across scanned rounds",
-                flush=True,
+            logger.info(
+                "%d/%d files: %d successful maps before deduplication, %d distinct successful maps across scanned rounds",
+                files_read, start_index + 1, original_count, len(seen),
             )
         if len(sample) == candidate_count:
             break
@@ -242,10 +216,14 @@ def main():
         raise ValueError(f"Requested {args.count} maps, found only {len(sample)} distinct successful maps")
     catalog = load_pool_catalog(args.room_data, catalog_hash, room_ids)
     room_sizes = catalog.room_sizes
+    edge_pairs = EdgePairs(catalog)
     anchors = torch.frombuffer(bytearray(b"".join(sample)), dtype=torch.uint8).reshape(-1, EPISODE_LENGTH)
     validate_pool_anchors(anchors, room_sizes)
     if 1 < args.count < len(sample):
-        selected = select_balanced_layouts(anchors, args.count, room_sizes, args.edge_weight or 0.0)
+        selected = select_balanced_layouts(
+            anchors, args.count, room_sizes, edge_pairs, args.edge_weight or 0.0,
+            iterations=args.iterations if args.iterations is not None else DEFAULT_ITERATIONS,
+        )
         sample = [sample[index] for index in selected]
         anchors = anchors[selected]
     else:
@@ -253,7 +231,7 @@ def main():
         anchors = anchors[:args.count]
     pool = bytearray(POOL_HEADER.pack(b"Z3MAPPL1", len(sample), catalog_hash, *room_ids))
     pool.extend(b"".join(sample))
-    stats = format_layout_stats(anchors, room_sizes)
+    stats = format_layout_stats(anchors, room_sizes, edge_pairs)
     output_path.parent.mkdir(exist_ok=True)
     if args.overwrite:
         with TemporaryDirectory(dir=output_path.parent) as directory:
@@ -263,8 +241,8 @@ def main():
     else:
         with output_path.open("xb") as output:
             output.write(pool)
-    print(f"Wrote {len(sample)} maps ({output_path.stat().st_size} bytes) to {output_path}")
-    print(stats)
+    logger.info("Wrote %d maps (%d bytes) to %s", len(sample), output_path.stat().st_size, output_path)
+    logger.info("%s", stats)
 
 
 if __name__ == "__main__":
